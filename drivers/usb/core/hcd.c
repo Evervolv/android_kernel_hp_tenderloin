@@ -1922,7 +1922,7 @@ int hcd_bus_suspend(struct usb_device *rhdev, pm_message_t msg)
 	int		status;
 	int		old_state = hcd->state;
 
-	dev_dbg(&rhdev->dev, "bus %s%s\n",
+	printk("bus %s%s\n",
 			(msg.event & PM_EVENT_AUTO ? "auto-" : ""), "suspend");
 	if (!hcd->driver->bus_suspend) {
 		status = -ENOENT;
@@ -1947,7 +1947,7 @@ int hcd_bus_resume(struct usb_device *rhdev, pm_message_t msg)
 	int		status;
 	int		old_state = hcd->state;
 
-	dev_dbg(&rhdev->dev, "usb %s%s\n",
+	printk("usb %s%s\n",
 			(msg.event & PM_EVENT_AUTO ? "auto-" : ""), "resume");
 	if (!hcd->driver->bus_resume)
 		return -ENOENT;

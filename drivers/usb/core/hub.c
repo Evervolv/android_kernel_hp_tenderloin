@@ -93,6 +93,8 @@ struct usb_hub {
 #error event_bits[] is too short!
 #endif
 
+	unsigned long		ports_to_resume;	/* resume along with hub */
+
 	struct usb_hub_descriptor *descriptor;	/* class descriptor */
 	struct usb_tt		tt;		/* Transaction Translator */
 
@@ -376,7 +378,7 @@ static int get_port_status(struct usb_device *hdev, int port1,
 				data, sizeof(*data), USB_STS_TIMEOUT);
 			if (status==4)
 			{
-				printk(KERN_DEBUG"%s port=%x,portstatus=%x, portchange=%x \n",
+				dev_dbg(&hdev->dev,"%s port=%x,portstatus=%x, portchange=%x \n",
 					__func__, port1, data->wPortStatus, data->wPortChange);
 				break;
 			}
@@ -2254,7 +2256,7 @@ int usb_port_suspend(struct usb_device *udev, pm_message_t msg)
 	int		port1 = udev->portnum;
 	int		status;
 
-	// dev_dbg(hub->intfdev, "suspend port %d\n", port1);
+	dev_dbg(hub->intfdev, "%s suspend port %d\n", __func__, port1);
 
 	/* enable remote wakeup when appropriate; this lets the device
 	 * wake up the upstream hub (including maybe the root hub).
@@ -2448,7 +2450,7 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 	if (status == 0 && !(portstatus & USB_PORT_STAT_SUSPEND))
 		goto SuspendCleared;
 
-	// dev_dbg(hub->intfdev, "resume port %d\n", port1);
+	dev_dbg(hub->intfdev, "%s, Enter resume port %d\n", __func__, port1);
 
 	set_bit(port1, hub->busy_bits);
 
@@ -2510,6 +2512,79 @@ int usb_remote_wakeup(struct usb_device *udev)
 	return status;
 }
 
+static void wakeup_race_workaround(struct usb_hub *hub)
+{
+	struct usb_device	*hdev = hub->hdev;
+	unsigned		port1;
+	struct usb_device	*udev;
+	unsigned long		ports = 0;
+	int			status;
+    u16 portstatus, portchange;
+
+	/*
+	 * Some external hubs do not handle the race between hub suspend
+	 * and child remote wakeup properly.  They lose the wakeup request
+	 * and sometimes even disconnect the child.
+	 *
+	 * The suggested workaround is to resume each child device that is
+	 * enabled for remote wakeup, just before suspending the hub itself.
+	 * Then the device will suspend along with the hub, so a race with
+	 * remote wakeup will be impossible.
+	 */
+	for (port1 = 1; port1 <= hdev->maxchild; port1++) {
+		udev = hdev->children[port1-1];
+		if (udev && udev->do_remote_wakeup) {
+			status = clear_port_feature(hdev,
+					port1, USB_PORT_FEAT_SUSPEND);
+//			dev_dbg(&udev->dev, "Hub race workaround part 1 (Clear Suspend): port: %d status: %d\n",
+//					port1, status);
+	        if (status) {
+		            printk("workaround: can't resume port %d, status %d\n", port1, status);
+	        } else {
+                    msleep(20);
+            		status = hub_port_status(hub, port1, &portstatus, &portchange);
+		            printk("workaround: port %d, status %04x, change %04x\n", port1, portstatus, portchange);
+		            msleep(10);
+	        }
+	        if (status == 0) {
+//			dev_dbg(&udev->dev, "Hub race workaround part 1 (Clear C_Suspend): port: %d status: %d\n",
+//					port1, status);
+		            if (portchange & USB_PORT_STAT_C_SUSPEND)
+			            clear_port_feature(hdev, port1,
+					    USB_PORT_FEAT_C_SUSPEND);
+	        }
+			ports |= 1 << port1;
+		}
+	}
+
+	hub->ports_to_resume = ports;
+//	if (ports)
+//		msleep(30);
+}
+
+static void wakeup_race_workaround_resume(struct usb_hub *hub)
+{
+	struct usb_device	*hdev = hub->hdev;
+	unsigned		port1;
+	struct usb_device	*udev;
+
+	/*
+	 * As a result of the workaround above, the child devices are
+	 * physically resumed already but their drivers don't know that.
+	 * Queue an asynchronous autoresume to tell the drivers.
+	 */
+	for (port1 = 1; port1 <= hdev->maxchild; port1++) {
+		if (hub->ports_to_resume & (1 << port1)) {
+			udev = hdev->children[port1-1];
+			if (udev) {
+				dev_dbg(&udev->dev, "Hub race workaround part 2 Resume port: %d\n", port1);
+				usb_autopm_get_interface_async(to_usb_interface(&udev->dev));
+				usb_autopm_put_interface_no_suspend(to_usb_interface(&udev->dev));
+			}
+		}
+	}
+}
+
 #else	/* CONFIG_USB_SUSPEND */
 
 /* When CONFIG_USB_SUSPEND isn't set, we never suspend or resume any ports. */
@@ -2542,6 +2617,10 @@ int usb_port_resume(struct usb_device *udev, pm_message_t msg)
 	return status;
 }
 
+static inline void wakeup_race_workaround(struct usb_hub *hub) { }
+
+static inline void wakeup_race_workaround_resume(struct usb_hub *hub) { }
+
 #endif
 
 static int hub_suspend(struct usb_interface *intf, pm_message_t msg)
@@ -2567,6 +2646,11 @@ static int hub_suspend(struct usb_interface *intf, pm_message_t msg)
 
 	/* stop khubd and related activity */
 	hub_quiesce(hub, HUB_SUSPEND);
+
+	// Workaround for race between suspend and wakeup request from child
+	if (hdev->parent)
+		wakeup_race_workaround(hub);
+
 	return 0;
 }
 
@@ -2576,6 +2660,11 @@ static int hub_resume(struct usb_interface *intf)
 
 	dev_dbg(&intf->dev, "%s\n", __func__);
 	hub_activate(hub, HUB_RESUME);
+/*
+	// Second part of suspend race workaround
+	if (hub->hdev->parent)
+		wakeup_race_workaround_resume(hub);
+*/
 	return 0;
 }
 
