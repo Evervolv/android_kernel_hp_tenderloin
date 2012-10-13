@@ -48,11 +48,11 @@
 #define ACM_CTRL_OVERRUN	0x40
 
 /*
- * Added enorcar Abstract state
+ * MBM, Added Abstract state
  */
 #define ACM_ABSTRACT_STATE	0x01
 #define ACM_ABS_IDLE		0x01
-#define ACM_ABS_MUX		0x02
+#define ACM_ABS_MUX		    0x02
 
 #define ACM_COUNTRY_SETTING	0x02
 
@@ -62,7 +62,7 @@
  */
 
 /*
- * The only reason to have several buffers is to accomodate assumptions
+ * The only reason to have several buffers is to accommodate assumptions
  * in line disciplines. They ask for empty space amount, receive our URB size,
  * and proceed to issue several 1-character writes, assuming they will fit.
  * The very first write takes a complete URB. Fortunately, this only happens
@@ -125,7 +125,7 @@ struct acm {
 	wait_queue_head_t drain_wait;			/* close processing */
 	struct tasklet_struct urb_task;                 /* rx processing */
 	spinlock_t throttle_lock;			/* synchronize throtteling and read callback */
-    unsigned int state;					/* enorcar: state for comm features */
+    unsigned int state;				/* MBM, state for comm features */
 	unsigned int ctrlin;				/* input control lines (DCD, DSR, RI, break, overruns) */
 	unsigned int ctrlout;				/* output control lines (DTR, RTS) */
 	unsigned int writesize;				/* max packet size for the output bulk endpoint */
@@ -139,8 +139,10 @@ struct acm {
 	unsigned int is_int_ep:1;			/* interrupt endpoints contrary to spec used */
 	u8 bInterval;
 	struct acm_wb *delayed_wb;			/* write queued for a device about to be woken */
-	wait_queue_head_t delta_ctrlin_wait;		/* wait queue for acm input control line interrupt (DCD, DSR, RI) */
-	struct async_icount icount;			/* counts of input control lines interrupt */
+	struct usb_ctrlrequest *irq;			/* MBM, added for get_encapsulated_command */
+	struct urb *response;
+	u8 *inbuf;
+	unsigned int bMaxPacketSize0;
 };
 
 #define CDC_DATA_INTERFACE_TYPE	0x0a
@@ -150,3 +152,5 @@ struct acm {
 #define SINGLE_RX_URB			2
 #define NO_CAP_LINE			4
 #define NOT_A_MODEM			8
+#define NO_DATA_INTERFACE		16
+#define NOT_REAL_ACM			32

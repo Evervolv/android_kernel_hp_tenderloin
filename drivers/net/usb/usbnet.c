@@ -43,12 +43,11 @@
 #include <linux/mii.h>
 #include <linux/usb.h>
 #include <linux/usb/usbnet.h>
-#include <linux/usb/cdc.h>
 #include <linux/slab.h>
 #include <linux/kernel.h>
 #include <linux/pm_runtime.h>
 
-#define DRIVER_VERSION		"22-Aug-2005"
+#define DRIVER_VERSION		"22-Aug-2005-mbm"
 
 
 /*-------------------------------------------------------------------------*/
@@ -64,9 +63,9 @@
  * let the USB host controller be busy for 5msec or more before an irq
  * is required, under load.  Jumbograms change the equation.
  */
-#define RX_MAX_QUEUE_MEMORY (30 * 1518)
+#define RX_MAX_QUEUE_MEMORY (60 * 1518)
 #define	RX_QLEN(dev) (((dev)->udev->speed == USB_SPEED_HIGH) ? \
-			((dev)->rx_queue_enable ? (RX_MAX_QUEUE_MEMORY/(dev)->rx_urb_size) : 1) : 4)
+		      ((dev)->rx_queue_enable ? (RX_MAX_QUEUE_MEMORY/(dev)->rx_urb_size) : 1) : 4)
 #define	TX_QLEN(dev) (((dev)->udev->speed == USB_SPEED_HIGH) ? \
 			(RX_MAX_QUEUE_MEMORY/(dev)->hard_mtu) : 4)
 
@@ -92,6 +91,29 @@ static int msg_level = -1;
 module_param (msg_level, int, 0);
 MODULE_PARM_DESC (msg_level, "Override default message level");
 
+static inline void skb_clone_tx_timestamp(struct sk_buff *skb)
+{
+}
+
+static inline bool skb_defer_rx_timestamp(struct sk_buff *skb)
+{
+	return false;
+}
+
+/**
+ * skb_tx_timestamp() - Driver hook for transmit timestamping
+ *
+ * Ethernet MAC Drivers should call this function in their hard_xmit()
+ * function as soon as possible after giving the sk_buff to the MAC
+ * hardware, but before freeing the sk_buff.
+ *
+ * @skb: A socket buffer.
+ */
+
+static inline void skb_tx_timestamp(struct sk_buff *skb)
+{
+	skb_clone_tx_timestamp(skb);
+}
 /*-------------------------------------------------------------------------*/
 
 /* handles CDC Ethernet and many other network "bulk data" interfaces */
@@ -101,7 +123,6 @@ int usbnet_get_endpoints(struct usbnet *dev, struct usb_interface *intf)
 	struct usb_host_interface	*alt = NULL;
 	struct usb_host_endpoint	*in = NULL, *out = NULL;
 	struct usb_host_endpoint	*status = NULL;
-	struct cdc_state		*info = (struct cdc_state *)&dev->data;
 
 	for (tmp = 0; tmp < intf->num_altsetting; tmp++) {
 		unsigned	ep;
@@ -111,15 +132,11 @@ int usbnet_get_endpoints(struct usbnet *dev, struct usb_interface *intf)
 
 		/* take the first altsetting with in-bulk + out-bulk;
 		 * remember any status endpoint, just in case;
-		 * ignore other endpoints and altsetttings.
+		 * ignore other endpoints and altsettings.
 		 */
 		for (ep = 0; ep < alt->desc.bNumEndpoints; ep++) {
 			struct usb_host_endpoint	*e;
 			int				intr = 0;
-
-			if (info->ncm && alt->desc.bInterfaceProtocol !=
-			NCM_DATA_CLASS_PROTOCOCL_CODE)
-				continue;
 
 			e = alt->endpoint + ep;
 			switch (e->desc.bmAttributes) {
@@ -244,6 +261,10 @@ void usbnet_skb_return (struct usbnet *dev, struct sk_buff *skb)
 	netif_dbg(dev, rx_status, dev->net, "< rx, len %zu, type 0x%x\n",
 		  skb->len + sizeof (struct ethhdr), skb->protocol);
 	memset (skb->cb, 0, sizeof (struct skb_data));
+
+	if (skb_defer_rx_timestamp(skb))
+		return;
+
 	status = netif_rx (skb);
 	if (status != NET_RX_SUCCESS)
 		netif_dbg(dev, rx_err, dev->net,
@@ -393,8 +414,12 @@ static int rx_submit (struct usbnet *dev, struct urb *urb, gfp_t flags)
 static inline void rx_process (struct usbnet *dev, struct sk_buff *skb)
 {
 	if (dev->driver_info->rx_fixup &&
-	    !dev->driver_info->rx_fixup (dev, skb))
-		goto error;
+	    !dev->driver_info->rx_fixup (dev, skb)) {
+		/* With RX_ASSEMBLE, rx_fixup() must update counters */
+		if (!(dev->driver_info->flags & FLAG_RX_ASSEMBLE))
+			dev->net->stats.rx_errors++;
+		goto done;
+	}
 	// else network stack removes extra byte if we forced a short packet
 
 	if (skb->len) {
@@ -407,8 +432,8 @@ static inline void rx_process (struct usbnet *dev, struct sk_buff *skb)
 	}
 
 	netif_dbg(dev, rx_err, dev->net, "drop\n");
-error:
 	dev->net->stats.rx_errors++;
+done:
 	skb_queue_tail(&dev->done, skb);
 }
 
@@ -491,6 +516,7 @@ block:
 		if (netif_running (dev->net) &&
 		    !test_bit (EVENT_RX_HALT, &dev->flags)) {
 			rx_submit (dev, urb, GFP_ATOMIC);
+			usb_mark_last_busy(dev->udev);
 			return;
 		}
 		usb_free_urb (urb);
@@ -523,9 +549,6 @@ static void intr_complete (struct urb *urb)
 		netdev_dbg(dev->net, "intr status %d\n", status);
 		break;
 	}
-
-	if (!netif_running (dev->net))
-		return;
 
 	memset(urb->transfer_buffer, 0, urb->transfer_buffer_length);
 	status = usb_submit_urb (urb, GFP_ATOMIC);
@@ -587,6 +610,15 @@ static int unlink_urbs (struct usbnet *dev, struct sk_buff_head *q)
 		entry = (struct skb_data *) skb->cb;
 		urb = entry->urb;
 
+		/*
+		 * Get reference count of the URB to avoid it to be
+		 * freed during usb_unlink_urb, which may trigger
+		 * use-after-free problem inside usb_unlink_urb since
+		 * usb_unlink_urb is always racing with .complete
+		 * handler(include defer_bh).
+		 */
+		usb_get_urb(urb);
+		spin_unlock_irqrestore(&q->lock, flags);
 		// during some PM-driven resume scenarios,
 		// these (async) unlinks complete immediately
 		retval = usb_unlink_urb (urb);
@@ -594,6 +626,8 @@ static int unlink_urbs (struct usbnet *dev, struct sk_buff_head *q)
 			netdev_dbg(dev->net, "unlink urb err, %d\n", retval);
 		else
 			count++;
+		usb_put_urb(urb);
+		spin_lock_irqsave(&q->lock, flags);
 	}
 	spin_unlock_irqrestore (&q->lock, flags);
 	return count;
@@ -647,6 +681,7 @@ int usbnet_stop (struct net_device *net)
 	struct driver_info	*info = dev->driver_info;
 	int			retval;
 
+	clear_bit(EVENT_DEV_OPEN, &dev->flags);
 	netif_stop_queue (net);
 
 	netif_info(dev, ifdown, dev->net,
@@ -668,8 +703,6 @@ int usbnet_stop (struct net_device *net)
 
 	if (!(info->flags & FLAG_AVOID_UNLINK_URBS))
 		usbnet_terminate_urbs(dev);
-
-	usb_kill_urb(dev->interrupt);
 
 	usbnet_purge_paused_rxq(dev);
 
@@ -728,17 +761,7 @@ int usbnet_open (struct net_device *net)
 		goto done;
 	}
 
-	/* start any status interrupt transfer */
-	if (dev->interrupt) {
-		usb_kill_urb(dev->interrupt); /* resume may add int urb */
-		retval = usb_submit_urb (dev->interrupt, GFP_KERNEL);
-		if (retval < 0) {
-			netif_err(dev, ifup, dev->net,
-				  "intr submit %d\n", retval);
-			goto done;
-		}
-	}
-
+	set_bit(EVENT_DEV_OPEN, &dev->flags);
 	netif_start_queue (net);
 	netif_info(dev, ifup, dev->net,
 		   "open: enable queueing (rx %d, tx %d) mtu %d %s framing\n",
@@ -1023,7 +1046,6 @@ static void tx_complete (struct urb *urb)
 	}
 
 	usb_autopm_put_interface_async(dev->intf);
-	urb->dev = NULL;
 	entry->state = tx_done;
 	defer_bh(dev, skb, &dev->txq);
 }
@@ -1053,7 +1075,9 @@ netdev_tx_t usbnet_start_xmit (struct sk_buff *skb,
 	struct driver_info	*info = dev->driver_info;
 	unsigned long		flags;
 	int retval;
-	struct sk_buff		*skb2;
+
+	if (skb)
+		skb_tx_timestamp(skb);
 
 	// some devices want funky USB-level framing, for
 	// win32 driver (usually) and/or hardware quirks
@@ -1199,8 +1223,7 @@ static void usbnet_bh (unsigned long param)
 	} else if (netif_running (dev->net) &&
 		   netif_device_present (dev->net) &&
 		   !timer_pending (&dev->delay) &&
-		   !test_bit (EVENT_RX_HALT, &dev->flags) &&
-		   !test_bit (EVENT_DEV_ASLEEP, &dev->flags)) {
+		   !test_bit (EVENT_RX_HALT, &dev->flags)) {
 		int	temp = dev->rxq.qlen;
 		int	qlen = RX_QLEN (dev);
 
@@ -1243,7 +1266,6 @@ void usbnet_disconnect (struct usb_interface *intf)
 	struct usbnet		*dev;
 	struct usb_device	*xdev;
 	struct net_device	*net;
-	struct urb*  		res;
 
 	dev = usb_get_intfdata(intf);
 	usb_set_intfdata(intf, NULL);
@@ -1260,25 +1282,14 @@ void usbnet_disconnect (struct usb_interface *intf)
 	net = dev->net;
 	unregister_netdev (net);
 
-	/* we don't hold rtnl here ... */
-	flush_scheduled_work ();
+	cancel_work_sync(&dev->kevent);
 
 	if (dev->driver_info->unbind)
 		dev->driver_info->unbind (dev, intf);
 
-	while ((res = usb_get_from_anchor(&dev->deferred))) {
-		struct sk_buff	*skb = (struct sk_buff *) res->context;
-		if (skb)
-			dev_kfree_skb_any (skb);
-		usb_free_urb(res);
-		usb_free_urb(res);
-	}
+	usb_kill_urb(dev->interrupt);
+	usb_free_urb(dev->interrupt);
 
-	if (dev->interrupt) {
-		usb_kill_urb(dev->interrupt);
-		dev->interrupt->transfer_flags |= URB_FREE_BUFFER;
-		usb_free_urb(dev->interrupt);
-	}
 	free_netdev(net);
 	usb_put_dev (xdev);
 }
@@ -1342,10 +1353,8 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 
 	// set up our own records
 	net = alloc_etherdev(sizeof(*dev));
-	if (!net) {
-		dbg ("can't kmalloc dev");
+	if (!net)
 		goto out;
-	}
 
 	/* netdev_printk() needs this so do it as early as possible */
 	SET_NETDEV_DEV(net, &udev->dev);
@@ -1401,7 +1410,8 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 		// else "eth%d" when there's reasonable doubt.  userspace
 		// can rename the link if it knows better.
 		if ((dev->driver_info->flags & FLAG_ETHER) != 0 &&
-		    (net->dev_addr [0] & 0x02) == 0)
+		    ((dev->driver_info->flags & FLAG_POINTTOPOINT) == 0 ||
+		     (net->dev_addr [0] & 0x02) == 0))
 			strcpy (net->name, "eth%d");
 		/* WLAN devices should always be named "wlan%d" */
 		if ((dev->driver_info->flags & FLAG_WLAN) != 0)
@@ -1431,6 +1441,16 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 	if (status < 0)
 		goto out3;
 
+	/* start any status interrupt transfer */
+	if (dev->interrupt) {
+		status = usb_submit_urb (dev->interrupt, GFP_KERNEL);
+		if (status < 0) {
+			netif_err(dev, ifup, dev->net,
+				  "intr submit %d\n", status);
+			goto out3;
+		}
+	}
+
 	if (!dev->rx_urb_size)
 		dev->rx_urb_size = dev->hard_mtu;
 	dev->maxpacket = usb_maxpacket (dev->udev, dev->out, 1);
@@ -1442,7 +1462,7 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 
 	status = register_netdev (net);
 	if (status)
-		goto out3;
+		goto out4;
 	netif_info(dev, probe, dev->net,
 		   "register '%s' at usb-%s-%s, %s, %pM\n",
 		   udev->dev.driver->name,
@@ -1450,7 +1470,6 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 		   dev->driver_info->description,
 		   net->dev_addr);
 
-	device_init_wakeup(&xdev->dev, 1);
 	// ok, it's ready to go.
 	usb_set_intfdata (udev, dev);
 
@@ -1461,6 +1480,8 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 
 	return 0;
 
+out4:
+	usb_kill_urb(dev->interrupt);
 out3:
 	if (info->unbind)
 		info->unbind (dev, udev);
@@ -1487,8 +1508,9 @@ int usbnet_suspend (struct usb_interface *intf, pm_message_t message)
 		spin_lock_irq(&dev->txq.lock);
 		/* don't autosuspend while transmitting */
 		if (dev->txq.qlen && (message.event & PM_EVENT_AUTO)) {
-			dev->suspend_count--;
 			spin_unlock_irq(&dev->txq.lock);
+			dev->suspend_count--;
+			netif_dbg(dev, link, dev->net, "%s return EBUSY, suspend_count=%d\n", __func__, dev->suspend_count);
 			return -EBUSY;
 		} else {
 			set_bit(EVENT_DEV_ASLEEP, &dev->flags);
@@ -1520,12 +1542,15 @@ int usbnet_resume (struct usb_interface *intf)
 	int                     retval;
 
 	if (!--dev->suspend_count) {
+		/* resume interrupt URBs */
+		if (dev->interrupt)
+			usb_submit_urb(dev->interrupt, GFP_NOIO);
+
 		spin_lock_irq(&dev->txq.lock);
 		while ((res = usb_get_from_anchor(&dev->deferred))) {
 
 			skb = (struct sk_buff *)res->context;
 			retval = usb_submit_urb(res, GFP_ATOMIC);
-			usb_free_urb(res);
 			if (retval < 0) {
 				dev_kfree_skb_any(skb);
 				usb_free_urb(res);
@@ -1539,20 +1564,12 @@ int usbnet_resume (struct usb_interface *intf)
 		smp_mb();
 		clear_bit(EVENT_DEV_ASLEEP, &dev->flags);
 		spin_unlock_irq(&dev->txq.lock);
-		if (!(dev->txq.qlen >= TX_QLEN(dev)))
-			netif_start_queue(dev->net);
 
-		/* start any status interrupt transfer */
-		if (dev->interrupt) {
-			retval = usb_submit_urb(dev->interrupt, GFP_ATOMIC);
-			if (retval < 0) {
-				netif_err(dev, ifup, dev->net,
-				  "intr submit %d\n", retval);
-				return retval;
-			}
+		if (test_bit(EVENT_DEV_OPEN, &dev->flags)) {
+			if (!(dev->txq.qlen >= TX_QLEN(dev)))
+				netif_tx_wake_all_queues(dev->net);
+			tasklet_schedule (&dev->bh);
 		}
-
-		tasklet_schedule (&dev->bh);
 	}
 	return 0;
 }
@@ -1563,9 +1580,9 @@ EXPORT_SYMBOL_GPL(usbnet_resume);
 
 static int __init usbnet_init(void)
 {
-	/* compiler should optimize this out */
-	BUILD_BUG_ON (sizeof (((struct sk_buff *)0)->cb)
-			< sizeof (struct skb_data));
+	/* Compiler should optimize this out. */
+	BUILD_BUG_ON(
+		FIELD_SIZEOF(struct sk_buff, cb) < sizeof(struct skb_data));
 
 	random_ether_addr(node_id);
 	return 0;

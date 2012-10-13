@@ -2,7 +2,7 @@
  * cdc-acm.c
  *
  * Copyright (c) 1999 Armin Fuerst	<fuerst@in.tum.de>
- * Copyright (c) 1999 Pavel Machek	<pavel@suse.cz>
+ * Copyright (c) 1999 Pavel Machek	<pavel@ucw.cz>
  * Copyright (c) 1999 Johannes Erdfelt	<johannes@erdfelt.com>
  * Copyright (c) 2000 Vojtech Pavlik	<vojtech@suse.cz>
  * Copyright (c) 2004 Oliver Neukum	<oliver@neukum.name>
@@ -33,6 +33,12 @@
  *	v0.24 - change probe method to evaluate CDC union descriptor
  *	v0.25 - downstream tasks paralelized to maximize throughput
  *	v0.26 - multiple write urbs, writesize increased
+ *	v0.26-mbm - submitting INT URB during probe
+ *	            added ABSTRACT state
+ *                  corrected multiple write during suspend state
+ *                  flush any encapsulated command
+ *	v0.26-mbm_1 - allocated the input request
+ *	v0.26-mbm_2 - added extra debug print open port
  */
 
 /*
@@ -79,7 +85,7 @@
 /*
  * Version Information
  */
-#define DRIVER_VERSION "v0.26"
+#define DRIVER_VERSION "v0.26-mbm_2"
 #define DRIVER_AUTHOR "Armin Fuerst, Pavel Machek, Johannes Erdfelt, Vojtech Pavlik, David Kubicek"
 #define DRIVER_DESC "USB Abstract Control Model driver for USB modems and ISDN adapters"
 
@@ -116,10 +122,10 @@ static int acm_ctrl_msg(struct acm *acm, int request, int value,
 	return retval < 0 ? retval : 0;
 }
 
-/* TODO: move to cdc.h */
+/* MBM */
 #define USB_CDC_SET_COMM_FEATURE       0x02
 #define USB_CDC_GET_COMM_FEATURE       0x03
-#define USB_CDC_CLEAR_COMM_FEATURE       0x04
+#define USB_CDC_CLEAR_COMM_FEATURE     0x04
 
 /* devices aren't required to support these requests.
  * the cdc acm descriptor tells whether they do...
@@ -130,13 +136,13 @@ static int acm_ctrl_msg(struct acm *acm, int request, int value,
 	acm_ctrl_msg(acm, USB_CDC_REQ_SET_LINE_CODING, 0, line, sizeof *(line))
 #define acm_send_break(acm, ms) \
 	acm_ctrl_msg(acm, USB_CDC_REQ_SEND_BREAK, ms, NULL, 0)
-
+/* MBM */
 #define acm_set_comm_feature(acm, feature, state) \
-        acm_ctrl_msg(acm, USB_CDC_SET_COMM_FEATURE, feature, state, 2)
+    acm_ctrl_msg(acm, USB_CDC_SET_COMM_FEATURE, feature, state, 2)
 #define acm_clear_comm_feature(acm, feature) \
-        acm_ctrl_msg(acm, USB_CDC_CLEAR_COMM_FEATURE, feature, NULL, 0)
- 
-
+    acm_ctrl_msg(acm, USB_CDC_CLEAR_COMM_FEATURE, feature, NULL, 0)
+#define acm_send_encap_resp(acm, msg)					\
+	acm_ctrl_msg(acm, USB_CDC_SEND_ENCAPSULATED_COMMAND, 0, msg, sizeof *(msg))
 
 /*
  * Write buffer management.
@@ -226,16 +232,16 @@ static int acm_write_start(struct acm *acm, int wbn)
 	dbg("%s susp_count: %d", __func__, acm->susp_count);
 	usb_autopm_get_interface_async(acm->control);
 	if (acm->susp_count) {
-		if (!acm->delayed_wb) {
+		if (!acm->delayed_wb)
 			acm->delayed_wb = wb;
-		} else {
+		else {
 			if (acm->delayed_wb->len + wb->len <= acm->writesize ) {
 				memcpy(acm->delayed_wb->buf + acm->delayed_wb->len, wb->buf, wb->len);
 				acm->delayed_wb->len += wb->len;
 			}
 			wb->use = 0;
 			usb_autopm_put_interface_async(acm->control);
-		}
+        }
 		spin_unlock_irqrestore(&acm->write_lock, flags);
 		return 0;	/* A white lie */
 	}
@@ -286,16 +292,52 @@ static DEVICE_ATTR(iCountryCodeRelDate, S_IRUGO, show_country_rel_date, NULL);
  * Interrupt handlers for various ACM device responses
  */
 
+/* MBM */
+static void acm_in_callback(struct urb *urb)
+{
+	struct acm *acm = urb->context;
+	int status = urb->status;
+	
+	if (status) {
+		switch (status) {
+                case -ENOENT:
+                        dev_dbg(&urb->dev->dev,
+                                "nonzero urb status received: -ENOENT");
+			goto skip_error;
+		case -ECONNRESET:
+			dev_dbg(&urb->dev->dev,
+				"nonzero urb status received: -ECONNRESET");
+			goto skip_error;
+		case -ESHUTDOWN:
+			dev_dbg(&urb->dev->dev,
+				"nonzero urb status received: -ESHUTDOWN");
+			goto skip_error;
+		case -EPIPE:
+			dev_err(&urb->dev->dev,
+				"nonzero urb status received: -EPIPE\n");
+			break;
+		default:
+			dev_err(&urb->dev->dev,
+				"Unexpected error %d\n", status);
+			break;
+		}
+	}
+	
+	dbg("unsupported encap: %s", (char *)acm->inbuf);
+skip_error:
+	dbg("");	
+}
+
 /* control interface reports status changes with "interrupt" transfers */
 static void acm_ctrl_irq(struct urb *urb)
 {
 	struct acm *acm = urb->context;
 	struct usb_cdc_notification *dr = urb->transfer_buffer;
+    /* MBM */
+	struct usb_ctrlrequest *req = acm->irq;
 	struct tty_struct *tty;
 	unsigned char *data;
 	int newctrl;
-	int delta_ctrlin;
-	int rising_edge_ctrlin;
 	int retval;
 	int status = urb->status;
 
@@ -322,7 +364,8 @@ static void acm_ctrl_irq(struct urb *urb)
 	data = (unsigned char *)(dr + 1);
 	switch (dr->bNotificationType) {
 	case USB_CDC_NOTIFY_NETWORK_CONNECTION:
-		dbg("%s network", dr->wValue ?
+        /* MBM */
+		dev_info(&urb->dev->dev, "%s network", dr->wValue ?
 					"connected to" : "disconnected from");
 		break;
 
@@ -339,36 +382,6 @@ static void acm_ctrl_irq(struct urb *urb)
 			tty_kref_put(tty);
 		}
 
-		/* both 1->0 and 0-1 transitions are counted for consistent signals.
-		 * like DCD and DSR signals
-		 */
-		delta_ctrlin = (acm->ctrlin ^ newctrl) & (ACM_CTRL_DCD | ACM_CTRL_DSR);
-		if (delta_ctrlin & ACM_CTRL_DCD)
-			acm->icount.dcd++;
-		if (delta_ctrlin & ACM_CTRL_DSR)
-			acm->icount.dsr++;
-		/* only 0->1 is counted for irregular signals.
-		 * like RI, BRK, FRAMING, PARITY and OVERRUN signals
-		 */
-		rising_edge_ctrlin = ~acm->ctrlin & newctrl &
-			(ACM_CTRL_RI | ACM_CTRL_BRK | ACM_CTRL_FRAMING | ACM_CTRL_PARITY | ACM_CTRL_OVERRUN);
-		if (rising_edge_ctrlin & ACM_CTRL_RI)
-			acm->icount.rng++;
-		if (rising_edge_ctrlin & ACM_CTRL_BRK)
-			acm->icount.brk++;
-		if (rising_edge_ctrlin & ACM_CTRL_FRAMING)
-			acm->icount.frame++;
-		if (rising_edge_ctrlin & ACM_CTRL_PARITY)
-			acm->icount.parity++;
-		if (rising_edge_ctrlin & ACM_CTRL_OVERRUN)
-			acm->icount.overrun++;
-
-		if (delta_ctrlin || rising_edge_ctrlin){
-			dbg("wake up because of input contrl lines interrupt, ctrlin:0x%x, delta_ctrlin:0x%x, rising_edge_ctrlin:0x%x",
-				acm->ctrlin, delta_ctrlin, rising_edge_ctrlin);
-			wake_up_interruptible(&acm->delta_ctrlin_wait);
-		}
-
 		acm->ctrlin = newctrl;
 
 		dbg("input control lines: dcd%c dsr%c break%c ring%c framing%c parity%c overrun%c",
@@ -381,8 +394,31 @@ static void acm_ctrl_irq(struct urb *urb)
 			acm->ctrlin & ACM_CTRL_OVERRUN ? '+' : '-');
 			break;
 
+    /* MBM */
+	case USB_CDC_NOTIFY_RESPONSE_AVAILABLE:
+		dev_err(&urb->dev->dev, "NOTIFY_RESPONSE_AVAILABLE received: index %d len %d",
+			dr->wIndex, dr->wLength);
+		req->bRequestType = (USB_DIR_IN | USB_TYPE_CLASS | USB_RECIP_INTERFACE);
+		req->bRequest = USB_CDC_GET_ENCAPSULATED_RESPONSE;
+		req->wValue = 0;
+		req->wIndex = cpu_to_le16(dr->wIndex);
+		req->wLength = cpu_to_le16(acm->bMaxPacketSize0);
+
+		usb_fill_control_urb(
+			acm->response,
+			acm->dev,
+			usb_sndctrlpipe(acm->dev, 0),
+			(unsigned char *)req,
+			acm->inbuf,
+			acm->bMaxPacketSize0,
+			acm_in_callback,
+			acm);
+		
+ 		break;
+
 	default:
-		dbg("unknown notification %d received: index %d len %d data0 %d data1 %d",
+        /* MBM */
+		dev_info(&urb->dev->dev,"unknown notification %d received: index %d len %d data0 %d data1 %d",
 			dr->bNotificationType, dr->wIndex,
 			dr->wLength, data[0], data[1]);
 		break;
@@ -499,12 +535,8 @@ next_buffer:
 urbs:
 	tty_kref_put(tty);
 
-	while (1) {
+	while (!list_empty(&acm->spare_read_bufs)) {
 		spin_lock_irqsave(&acm->read_lock, flags);
-		if (list_empty(&acm->spare_read_bufs)) {
-			spin_unlock_irqrestore(&acm->read_lock, flags);
-			break;
-		}
 		if (list_empty(&acm->spare_read_urbs)) {
 			acm->processing = 0;
 			spin_unlock_irqrestore(&acm->read_lock, flags);
@@ -513,11 +545,11 @@ urbs:
 		rcv = list_entry(acm->spare_read_urbs.next,
 				 struct acm_ru, list);
 		list_del(&rcv->list);
+		spin_unlock_irqrestore(&acm->read_lock, flags);
 
 		buf = list_entry(acm->spare_read_bufs.next,
 				 struct acm_rb, list);
 		list_del(&buf->list);
-		spin_unlock_irqrestore(&acm->read_lock, flags);
 
 		rcv->buffer = buf;
 
@@ -588,11 +620,10 @@ static void acm_softint(struct work_struct *work)
 	if (!ACM_READY(acm))
 		return;
 	tty = tty_port_tty_get(&acm->port);
-	if (tty)
-	{
-		tty_wakeup(tty);
-		tty_kref_put(tty);
-	}
+	if (!tty)
+		return;
+	tty_wakeup(tty);
+	tty_kref_put(tty);
 }
 
 /*
@@ -604,7 +635,6 @@ static int acm_tty_open(struct tty_struct *tty, struct file *filp)
 	struct acm *acm;
 	int rv = -ENODEV;
 	int i;
-	dbg("Entering acm_tty_open.");
 
 	mutex_lock(&open_mutex);
 
@@ -631,16 +661,11 @@ static int acm_tty_open(struct tty_struct *tty, struct file *filp)
 		goto out;
 	}
 
-	acm->ctrlurb->dev = acm->dev;
-	if (usb_submit_urb(acm->ctrlurb, GFP_KERNEL)) {
-		dbg("usb_submit_urb(ctrl irq) failed");
-		goto bail_out;
-	}
-
 	if (0 > acm_set_control(acm, acm->ctrlout = ACM_CTRL_DTR | ACM_CTRL_RTS) &&
 	    (acm->ctrl_caps & USB_CDC_CAP_LINE))
 		goto full_bailout;
 
+	/* MBM */
 	acm->state &= ~ACM_ABS_IDLE;
 	if (0 > acm_set_comm_feature(acm, ACM_ABSTRACT_STATE, &acm->state) &&
 	    (acm->ctrl_caps & USB_CDC_COMM_FEATURE))
@@ -669,8 +694,6 @@ out:
 	return rv;
 
 full_bailout:
-	usb_kill_urb(acm->ctrlurb);
-bail_out:
 	acm->port.count--;
 	mutex_unlock(&acm->mutex);
 	usb_autopm_put_interface(acm->control);
@@ -689,34 +712,32 @@ static void acm_tty_unregister(struct acm *acm)
 	usb_put_intf(acm->control);
 	acm_table[acm->minor] = NULL;
 	usb_free_urb(acm->ctrlurb);
+    /* MBM */
+	usb_free_urb(acm->response);
 	for (i = 0; i < ACM_NW; i++)
 		usb_free_urb(acm->wb[i].urb);
 	for (i = 0; i < nr; i++)
 		usb_free_urb(acm->ru[i].urb);
+    /* MBM */
+	kfree(acm->irq);
 	kfree(acm->country_codes);
 	kfree(acm);
 }
 
 static int acm_tty_chars_in_buffer(struct tty_struct *tty);
 
-static void acm_port_down(struct acm *acm, int drain)
+static void acm_port_down(struct acm *acm)
 {
 	int i, nr = acm->rx_buflimit;
 	mutex_lock(&open_mutex);
 	if (acm->dev) {
 		usb_autopm_get_interface(acm->control);
 		acm_set_control(acm, acm->ctrlout = 0);
-#ifdef SUPERSAFE
+        /* MBM */
 		acm->state |= ACM_ABS_IDLE;
 		acm_set_comm_feature(acm, ACM_ABSTRACT_STATE, &acm->state);
-#endif
-		/* try letting the last writes drain naturally */
-		if (drain) {
-			wait_event_interruptible_timeout(acm->drain_wait,
-				(ACM_NW == acm_wb_is_avail(acm)) || !acm->dev,
-					ACM_CLOSE_TIMEOUT * HZ);
-		}
-		usb_kill_urb(acm->ctrlurb);
+		/* MBM, Device can still transmitt INT messages dont kill */
+		/* usb_kill_urb(acm->ctrlurb); */
 		for (i = 0; i < ACM_NW; i++)
 			usb_kill_urb(acm->wb[i].urb);
 		tasklet_disable(&acm->urb_task);
@@ -733,7 +754,7 @@ static void acm_tty_hangup(struct tty_struct *tty)
 {
 	struct acm *acm = tty->driver_data;
 	tty_port_hangup(&acm->port);
-	acm_port_down(acm, 0);
+	acm_port_down(acm);
 }
 
 static void acm_tty_close(struct tty_struct *tty, struct file *filp)
@@ -754,7 +775,7 @@ static void acm_tty_close(struct tty_struct *tty, struct file *filp)
 		mutex_unlock(&open_mutex);
 		return;
 	}
-	acm_port_down(acm, 0);
+	acm_port_down(acm);
 	tty_port_close_end(&acm->port, tty);
 	tty_port_tty_set(&acm->port, NULL);
 }
@@ -851,7 +872,7 @@ static int acm_tty_break_ctl(struct tty_struct *tty, int state)
 	return retval;
 }
 
-static int acm_tty_tiocmget(struct tty_struct *tty, struct file *file)
+static int acm_tty_tiocmget(struct tty_struct *tty)
 {
 	struct acm *acm = tty->driver_data;
 
@@ -866,7 +887,7 @@ static int acm_tty_tiocmget(struct tty_struct *tty, struct file *file)
 	       TIOCM_CTS;
 }
 
-static int acm_tty_tiocmset(struct tty_struct *tty, struct file *file,
+static int acm_tty_tiocmset(struct tty_struct *tty,
 			    unsigned int set, unsigned int clear)
 {
 	struct acm *acm = tty->driver_data;
@@ -888,81 +909,13 @@ static int acm_tty_tiocmset(struct tty_struct *tty, struct file *file,
 	return acm_set_control(acm, acm->ctrlout = newctrl);
 }
 
-static int acm_tty_ioctl(struct tty_struct *tty, struct file *file,
+static int acm_tty_ioctl(struct tty_struct *tty,
 					unsigned int cmd, unsigned long arg)
 {
 	struct acm *acm = tty->driver_data;
-	struct async_icount cprev;
-	struct async_icount cnow;
-	struct serial_icounter_struct icount;
 
 	if (!ACM_READY(acm))
 		return -EINVAL;
-
-	switch (cmd) {
-		/*
-		 * Wait for any of the 3 modem inputs (DCD,RI,DSR) to change
-		 * - mask passed in arg for lines of interest
-		 *   (use |'ed TIOCM_RNG/DSR/CD for masking)
-		 * Caller should use TIOCGICOUNT to see which one it was
-		 *
-		 * CTS interrupt input is not defined in USB CDC subclass specification.
-		 */
-		case TIOCMIWAIT:
-			local_irq_disable();
-			cprev = acm->icount; /* atomic copy */
-			local_irq_enable();
-			dbg("handle TIOCMIWAIT ioctrl");
-			while(1) {
-				dbg("current process sleep");
-				interruptible_sleep_on(&acm->delta_ctrlin_wait);
-				dbg("current process wake up");
-				/* see if a signal did it */
-				if (signal_pending(current))
-					return -ERESTARTSYS;
-				local_irq_disable();
-				cnow = acm->icount; /* atomic copy */
-				local_irq_enable();
-				if ((cprev.rng == cnow.rng) &&
-				    (cprev.dsr == cnow.dsr) &&
-				    (cprev.dcd == cnow.dcd) &&
-				    (cprev.cts == cnow.cts))
-					return -EIO; /* no change ==> error */
-				if (((arg & TIOCM_RNG) && (cprev.rng != cnow.rng)) ||
-				    ((arg & TIOCM_DSR) && (cprev.dsr != cnow.dsr)) ||
-				    ((arg & TIOCM_CD)  && (cprev.dcd != cnow.dcd)) ||
-				    ((arg & TIOCM_CTS) && (cprev.cts != cnow.cts)))
-					return 0;
-				cprev = cnow;
-			}
-		/*
-		 * Get counter of input serial line interrupts (DCD,RI,DSR,BRK,PARITY,FRAME and OVERRUN)
-		 * Return: write counters to the user passed counter struct
-		 *
-		 * CTS interrupt input is not defined in USB CDC subclass specification.
-		 */
-		case TIOCGICOUNT:
-			dbg("handle TIOCGICOUNT ioctrl");
-			local_irq_disable();
-			cnow = acm->icount; /* atomic copy */
-			local_irq_enable();
-
-			memset(&icount, 0, sizeof(icount));
-			icount.cts = cnow.cts;
-			icount.dsr = cnow.dsr;
-			icount.rng = cnow.rng;
-			icount.dcd = cnow.dcd;
-			icount.rx = cnow.rx;
-			icount.tx = cnow.tx;
-			icount.frame = cnow.frame;
-			icount.overrun = cnow.overrun;
-			icount.parity = cnow.parity;
-			icount.brk = cnow.brk;
-			icount.buf_overrun = cnow.buf_overrun;
-			if (copy_to_user((void __user *)arg, &icount, sizeof(icount)))
-				return -EFAULT;
-			return 0;
-	}
 
 	return -ENOIOCTLCMD;
 }
@@ -1084,7 +1037,7 @@ static int acm_probe(struct usb_interface *intf,
 	u8 ac_management_function = 0;
 	u8 call_management_function = 0;
 	int call_interface_num = -1;
-	int data_interface_num;
+	int data_interface_num = -1;
 	unsigned long quirks;
 	int num_rx_buf;
 	int i;
@@ -1093,6 +1046,10 @@ static int acm_probe(struct usb_interface *intf,
 	/* normal quirks */
 	quirks = (unsigned long)id->driver_info;
 	num_rx_buf = (quirks == SINGLE_RX_URB) ? 1 : ACM_NR;
+
+	/* MBM, Not a real CDC ACM device */
+	if (quirks == NOT_REAL_ACM)
+		return -ENODEV;
 
 	/* handle quirks deadly to normal probing*/
 	if (quirks == NO_UNION_NORMAL) {
@@ -1108,8 +1065,8 @@ static int acm_probe(struct usb_interface *intf,
 	}
 
 	if (!buflen) {
-		if (intf->cur_altsetting->endpoint &&
-				intf->cur_altsetting->endpoint->extralen &&
+        /* MBM */
+		if (intf->cur_altsetting->endpoint->extralen &&
 				intf->cur_altsetting->endpoint->extra) {
 			dev_dbg(&intf->dev,
 				"Seeking extra descriptors on endpoint\n");
@@ -1168,7 +1125,11 @@ next_desc:
 	if (!union_header) {
 		if (call_interface_num > 0) {
 			dev_dbg(&intf->dev, "No union descriptor, using call management descriptor\n");
-			data_interface = usb_ifnum_to_if(usb_dev, (data_interface_num = call_interface_num));
+			/* quirks for Droids MuIn LCD */
+			if (quirks & NO_DATA_INTERFACE)
+				data_interface = usb_ifnum_to_if(usb_dev, 0);
+			else
+				data_interface = usb_ifnum_to_if(usb_dev, (data_interface_num = call_interface_num));
 			control_interface = intf;
 		} else {
 			if (intf->cur_altsetting->desc.bNumEndpoints != 3) {
@@ -1287,6 +1248,7 @@ made_compressed_probe:
 
 	ctrlsize = le16_to_cpu(epctrl->wMaxPacketSize);
 	readsize = le16_to_cpu(epread->wMaxPacketSize) *
+                /* MBM */
 				(quirks == SINGLE_RX_URB ? 1 : 4);
 	acm->combined_interfaces = combined_interfaces;
 	acm->writesize = le16_to_cpu(epwrite->wMaxPacketSize) * 20;
@@ -1314,12 +1276,31 @@ made_compressed_probe:
 		acm->bInterval = epread->bInterval;
 	tty_port_init(&acm->port);
 	acm->port.ops = &acm_port_ops;
-	init_waitqueue_head(&acm->delta_ctrlin_wait);
+
+    /* MBM */
+	acm->response = usb_alloc_urb(0, GFP_KERNEL);
+	if (!acm->response) {
+		dev_dbg(&intf->dev, "out of memory (response kmalloc)\n");
+		goto alloc_fail2;
+	}
+
+    /* MBM */
+	acm->bMaxPacketSize0 = usb_dev->descriptor.bMaxPacketSize0;
+	acm->inbuf = usb_alloc_coherent(usb_dev,
+					acm->bMaxPacketSize0,
+					GFP_KERNEL,
+					&acm->response->transfer_dma);
+    /* MBM */
+	if (!acm->inbuf) {
+		dev_dbg(&intf->dev, "out of memory (inbuf kmalloc)\n");
+                goto alloc_fail3;
+	}
 
 	buf = usb_alloc_coherent(usb_dev, ctrlsize, GFP_KERNEL, &acm->ctrl_dma);
 	if (!buf) {
 		dev_dbg(&intf->dev, "out of memory (ctrl buffer alloc)\n");
-		goto alloc_fail2;
+        /* MBM */
+		goto alloc_fail3_1;
 	}
 	acm->ctrl_buffer = buf;
 
@@ -1418,15 +1399,28 @@ skip_countries:
 	acm->ctrlurb->transfer_flags |= URB_NO_TRANSFER_DMA_MAP;
 	acm->ctrlurb->transfer_dma = acm->ctrl_dma;
 
+    /* MBM */
+	acm->ctrlurb->dev = acm->dev;
+	if (usb_submit_urb(acm->ctrlurb, GFP_KERNEL)) {
+		dev_err(&intf->dev, "usb_submit_urb(ctrl irq) failed");
+		goto kill_urb;
+	}
+
+    /* MBM */
+	acm->irq = kmalloc(sizeof(struct usb_ctrlrequest), GFP_KERNEL);
+	if (!acm->irq)
+		goto kill_urb;
+
 	dev_info(&intf->dev, "ttyACM%d: USB ACM device\n", minor);
 
 	acm_set_control(acm, acm->ctrlout);
 
+    /* MBM */
 	acm->line.dwDTERate = cpu_to_le32(115200);
 	acm->line.bDataBits = 8;
 	acm_set_line(acm, &acm->line);
-	
 
+    /* MBM */
 	acm->state |=  ACM_ABS_IDLE;
 	acm_set_comm_feature(acm, ACM_ABSTRACT_STATE, &acm->state);
 
@@ -1437,10 +1431,11 @@ skip_countries:
 	tty_register_device(acm_tty_driver, minor, &control_interface->dev);
 
 	acm_table[minor] = acm;
-	usb_enable_autosuspend(usb_dev);
-	dev_dbg(&usb_dev->dev, "######### %s: usb_enable_autosuspend\n", __func__);
 
 	return 0;
+    /* MBM */
+kill_urb:
+	usb_kill_urb(acm->ctrlurb);
 alloc_fail8:
 	for (i = 0; i < ACM_NW; i++)
 		usb_free_urb(acm->wb[i].urb);
@@ -1454,6 +1449,11 @@ alloc_fail5:
 	acm_write_buffers_free(acm);
 alloc_fail4:
 	usb_free_coherent(usb_dev, ctrlsize, acm->ctrl_buffer, acm->ctrl_dma);
+    /* MBM */
+alloc_fail3_1:
+	usb_free_coherent(usb_dev,acm->bMaxPacketSize0, acm->inbuf, acm->response->transfer_dma);
+alloc_fail3:
+	usb_free_urb(acm->response);
 alloc_fail2:
 	kfree(acm);
 alloc_fail:
@@ -1467,7 +1467,8 @@ static void stop_data_traffic(struct acm *acm)
 
 	tasklet_disable(&acm->urb_task);
 
-	usb_kill_urb(acm->ctrlurb);
+    /* MBM, Do not kill URB */
+	/* usb_kill_urb(acm->ctrlurb); */
 	for (i = 0; i < ACM_NW; i++)
 		usb_kill_urb(acm->wb[i].urb);
 	for (i = 0; i < acm->rx_buflimit; i++)
@@ -1488,8 +1489,6 @@ static void acm_disconnect(struct usb_interface *intf)
 	if (!acm)
 		return;
 
-	lock_kernel();
-
 	mutex_lock(&open_mutex);
 	if (acm->country_codes) {
 		device_remove_file(&acm->control->dev,
@@ -1509,6 +1508,9 @@ static void acm_disconnect(struct usb_interface *intf)
 			  acm->ctrl_dma);
 	acm_read_buffers_free(acm);
 
+    /* MBM */
+	usb_free_coherent(usb_dev,acm->bMaxPacketSize0, acm->inbuf, acm->response->transfer_dma);
+
 	if (!acm->combined_interfaces)
 		usb_driver_release_interface(&acm_driver, intf == acm->control ?
 					acm->data : acm->control);
@@ -1516,7 +1518,6 @@ static void acm_disconnect(struct usb_interface *intf)
 	if (acm->port.count == 0) {
 		acm_tty_unregister(acm);
 		mutex_unlock(&open_mutex);
-		unlock_kernel();
 		return;
 	}
 
@@ -1526,7 +1527,6 @@ static void acm_disconnect(struct usb_interface *intf)
 		tty_hangup(tty);
 		tty_kref_put(tty);
 	}
-	unlock_kernel();
 }
 
 #ifdef CONFIG_PM
@@ -1561,8 +1561,12 @@ static int acm_suspend(struct usb_interface *intf, pm_message_t message)
 	*/
 	mutex_lock(&acm->mutex);
 
-	if (acm->port.count)
+    /* MBM, Kill URB here! */
+	usb_kill_urb(acm->ctrlurb);
+	if (acm->port.count) {
 		stop_data_traffic(acm);
+		/* dev_info(&intf->dev, "ttyACM%d: suspend\n", acm->minor); */
+	}
 
 	mutex_unlock(&acm->mutex);
 	return 0;
@@ -1584,8 +1588,13 @@ static int acm_resume(struct usb_interface *intf)
 		return 0;
 
 	mutex_lock(&acm->mutex);
+	/* MBM, We have to resubmit the INT URB regardless of the port is open or not */
+	if (usb_submit_urb(acm->ctrlurb, GFP_NOIO)) {
+		dev_err(&intf->dev, "usb_submit_urb(ctrl irq) failed");
+	}
+ 
 	if (acm->port.count) {
-		rv = usb_submit_urb(acm->ctrlurb, GFP_NOIO);
+		/* dev_info(&intf->dev, "ttyACM%d: resume\n", acm->minor); */
 
 		spin_lock_irq(&acm->write_lock);
 		if (acm->delayed_wb) {
@@ -1633,6 +1642,11 @@ static int acm_reset_resume(struct usb_interface *intf)
 
 #define NOKIA_PCSUITE_ACM_INFO(x) \
 		USB_DEVICE_AND_INTERFACE_INFO(0x0421, x, \
+		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
+		USB_CDC_ACM_PROTO_VENDOR)
+
+#define SAMSUNG_PCSUITE_ACM_INFO(x) \
+		USB_DEVICE_AND_INTERFACE_INFO(0x04e7, x, \
 		USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM, \
 		USB_CDC_ACM_PROTO_VENDOR)
 
@@ -1696,7 +1710,10 @@ static const struct usb_device_id acm_ids[] = {
 	{ USB_DEVICE(0x1576, 0x03b1), /* Maretron USB100 */
 	.driver_info = NO_UNION_NORMAL, /* reports zero length descriptor */
 	},
-
+    /* MBM */
+	{ USB_DEVICE(0x1519, 0x0020),
+	.driver_info = NO_UNION_NORMAL, /* has no union descriptor */
+	},
 	/* Nokia S60 phones expose two ACM channels. The first is
 	 * a modem and is picked up by the standard AT-command
 	 * information below. The second is 'vendor-specific' but
@@ -1746,13 +1763,37 @@ static const struct usb_device_id acm_ids[] = {
 	{ NOKIA_PCSUITE_ACM_INFO(0x0108), }, /* Nokia 5320 XpressMusic 2G */
 	{ NOKIA_PCSUITE_ACM_INFO(0x01f5), }, /* Nokia N97, RM-505 */
 	{ NOKIA_PCSUITE_ACM_INFO(0x02e3), }, /* Nokia 5230, RM-588 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x0178), }, /* Nokia E63 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x010e), }, /* Nokia E75 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x02d9), }, /* Nokia 6760 Slide */
+	{ NOKIA_PCSUITE_ACM_INFO(0x01d0), }, /* Nokia E52 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x0223), }, /* Nokia E72 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x0275), }, /* Nokia X6 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x026c), }, /* Nokia N97 Mini */
+	{ NOKIA_PCSUITE_ACM_INFO(0x0154), }, /* Nokia 5800 XpressMusic */
+	{ NOKIA_PCSUITE_ACM_INFO(0x04ce), }, /* Nokia E90 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x01d4), }, /* Nokia E55 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x0302), }, /* Nokia N8 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x0335), }, /* Nokia E7 */
+	{ NOKIA_PCSUITE_ACM_INFO(0x03cd), }, /* Nokia C7 */
+	{ SAMSUNG_PCSUITE_ACM_INFO(0x6651), }, /* Samsung GTi8510 (INNOV8) */
 
 	/* NOTE: non-Nokia COMM/ACM/0xff is likely MSFT RNDIS... NOT a modem! */
 
 	/* Support Lego NXT using pbLua firmware */
 	{ USB_DEVICE(0x0694, 0xff00),
 	.driver_info = NOT_A_MODEM,
-       	},
+	},
+
+	/* Support for Droids MuIn LCD */
+	{ USB_DEVICE(0x04d8, 0x000b),
+	.driver_info = NO_DATA_INTERFACE,
+	},
+
+	/* Exclude XMM6260 boot rom (not running modem software yet) */
+	{ USB_DEVICE(0x058b, 0x0041),
+	.driver_info = NOT_REAL_ACM,
+	},
 
 	/* control interfaces with various AT-command sets */
 	{ USB_INTERFACE_INFO(USB_CLASS_COMM, USB_CDC_SUBCLASS_ACM,
