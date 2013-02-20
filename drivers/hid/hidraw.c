@@ -19,6 +19,8 @@
  * 51 Franklin St - Fifth Floor, Boston, MA 02110-1301 USA.
  */
 
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
+
 #include <linux/fs.h>
 #include <linux/module.h>
 #include <linux/errno.h>
@@ -32,7 +34,6 @@
 #include <linux/hid.h>
 #include <linux/mutex.h>
 #include <linux/sched.h>
-#include <linux/smp_lock.h>
 
 #include <linux/hidraw.h>
 
@@ -46,7 +47,6 @@ static ssize_t hidraw_read(struct file *file, char __user *buffer, size_t count,
 {
 	struct hidraw_list *list = file->private_data;
 	int ret = 0, len;
-	char *report;
 	DECLARE_WAITQUEUE(wait, current);
 
 	mutex_lock(&list->read_mutex);
@@ -84,7 +84,6 @@ static ssize_t hidraw_read(struct file *file, char __user *buffer, size_t count,
 		if (ret)
 			goto out;
 
-		report = list->buffer[list->tail].value;
 		len = list->buffer[list->tail].len > count ?
 			count : list->buffer[list->tail].len;
 
@@ -177,12 +176,12 @@ static ssize_t hidraw_get_report(struct file *file, char __user *buffer, size_t 
 	unsigned int minor = iminor(file->f_path.dentry->d_inode);
 	struct hid_device *dev;
 	__u8 *buf;
-	int ret = 0;
+	int ret = 0, len;
+	unsigned char report_number;
 
-	mutex_lock(&minors_lock);
 	dev = hidraw_table[minor]->hid;
 
-	if (!dev->hid_output_raw_report) {
+	if (!dev->hid_get_raw_report) {
 		ret = -ENODEV;
 		goto out;
 	}
@@ -226,11 +225,11 @@ static ssize_t hidraw_get_report(struct file *file, char __user *buffer, size_t 
 		goto out_free;
 	}
 
-	ret = dev->hid_output_raw_report(dev, buf, count, HID_OUTPUT_REPORT);
+	ret = len;
+
 out_free:
 	kfree(buf);
 out:
-	mutex_unlock(&minors_lock);
 	return ret;
 }
 
@@ -272,15 +271,13 @@ static int hidraw_open(struct inode *inode, struct file *file)
 
 	dev = hidraw_table[minor];
 	if (!dev->open++) {
-		if (dev->hid->ll_driver->power) {
-			err = dev->hid->ll_driver->power(dev->hid, PM_HINT_FULLON);
-			if (err < 0)
-				goto out_unlock;
-		}
-		err = dev->hid->ll_driver->open(dev->hid);
+		err = hid_hw_power(dev->hid, PM_HINT_FULLON);
+		if (err < 0)
+			goto out_unlock;
+
+		err = hid_hw_open(dev->hid);
 		if (err < 0) {
-			if (dev->hid->ll_driver->power)
-				dev->hid->ll_driver->power(dev->hid, PM_HINT_NORMAL);
+			hid_hw_power(dev->hid, PM_HINT_NORMAL);
 			dev->open--;
 		}
 	}
@@ -297,25 +294,30 @@ static int hidraw_release(struct inode * inode, struct file * file)
 	unsigned int minor = iminor(inode);
 	struct hidraw *dev;
 	struct hidraw_list *list = file->private_data;
+	int ret;
 
-	if (!hidraw_table[minor])
-		return -ENODEV;
+	mutex_lock(&minors_lock);
+	if (!hidraw_table[minor]) {
+		ret = -ENODEV;
+		goto unlock;
+	}
 
 	list_del(&list->node);
 	dev = hidraw_table[minor];
 	if (!--dev->open) {
 		if (list->hidraw->exist) {
-			if (dev->hid->ll_driver->power)
-				dev->hid->ll_driver->power(dev->hid, PM_HINT_NORMAL);
-			dev->hid->ll_driver->close(dev->hid);
+			hid_hw_power(dev->hid, PM_HINT_NORMAL);
+			hid_hw_close(dev->hid);
 		} else {
 			kfree(list->hidraw);
 		}
 	}
-
 	kfree(list);
+	ret = 0;
+unlock:
+	mutex_unlock(&minors_lock);
 
-	return 0;
+	return ret;
 }
 
 static long hidraw_ioctl(struct file *file, unsigned int cmd,
@@ -329,6 +331,10 @@ static long hidraw_ioctl(struct file *file, unsigned int cmd,
 
 	mutex_lock(&minors_lock);
 	dev = hidraw_table[minor];
+	if (!dev) {
+		ret = -ENODEV;
+		goto out;
+	}
 
 	switch (cmd) {
 		case HIDIOCGRDESCSIZE:
@@ -366,7 +372,24 @@ static long hidraw_ioctl(struct file *file, unsigned int cmd,
 		default:
 			{
 				struct hid_device *hid = dev->hid;
-				if (_IOC_TYPE(cmd) != 'H' || _IOC_DIR(cmd) != _IOC_READ) {
+				if (_IOC_TYPE(cmd) != 'H') {
+					ret = -EINVAL;
+					break;
+				}
+
+				if (_IOC_NR(cmd) == _IOC_NR(HIDIOCSFEATURE(0))) {
+					int len = _IOC_SIZE(cmd);
+					ret = hidraw_send_report(file, user_arg, len, HID_FEATURE_REPORT);
+					break;
+				}
+				if (_IOC_NR(cmd) == _IOC_NR(HIDIOCGFEATURE(0))) {
+					int len = _IOC_SIZE(cmd);
+					ret = hidraw_get_report(file, user_arg, len, HID_FEATURE_REPORT);
+					break;
+				}
+
+				/* Begin Read-only ioctls. */
+				if (_IOC_DIR(cmd) != _IOC_READ) {
 					ret = -EINVAL;
 					break;
 				}
@@ -398,10 +421,11 @@ static long hidraw_ioctl(struct file *file, unsigned int cmd,
 						-EFAULT : len;
 					break;
 				}
-		}
+			}
 
 		ret = -ENOTTY;
 	}
+out:
 	mutex_unlock(&minors_lock);
 	return ret;
 }
@@ -414,6 +438,10 @@ static const struct file_operations hidraw_ops = {
 	.open =         hidraw_open,
 	.release =      hidraw_release,
 	.unlocked_ioctl = hidraw_ioctl,
+#ifdef CONFIG_COMPAT
+	.compat_ioctl   = hidraw_ioctl,
+#endif
+	.llseek =	noop_llseek,
 };
 
 void hidraw_report_event(struct hid_device *hid, u8 *data, int len)
@@ -501,7 +529,7 @@ void hidraw_disconnect(struct hid_device *hid)
 	device_destroy(hidraw_class, MKDEV(hidraw_major, hidraw->minor));
 
 	if (hidraw->open) {
-		hid->ll_driver->close(hid);
+		hid_hw_close(hid);
 		wake_up_interruptible(&hidraw->wait);
 	} else {
 		kfree(hidraw);
@@ -520,7 +548,7 @@ int __init hidraw_init(void)
 	hidraw_major = MAJOR(dev_id);
 
 	if (result < 0) {
-		printk(KERN_WARNING "hidraw: can't get major number\n");
+		pr_warn("can't get major number\n");
 		result = 0;
 		goto out;
 	}

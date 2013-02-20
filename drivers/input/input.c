@@ -372,6 +372,23 @@ void input_inject_event(struct input_handle *handle,
 EXPORT_SYMBOL(input_inject_event);
 
 /**
+ * input_alloc_absinfo - allocates array of input_absinfo structs
+ * @dev: the input device emitting absolute events
+ *
+ * If the absinfo struct the caller asked for is already allocated, this
+ * functions will not do anything.
+ */
+void input_alloc_absinfo(struct input_dev *dev)
+{
+	if (!dev->absinfo)
+		dev->absinfo = kcalloc(ABS_CNT, sizeof(struct input_absinfo),
+					GFP_KERNEL);
+
+	WARN(!dev->absinfo, "%s(): kcalloc() failed?\n", __func__);
+}
+EXPORT_SYMBOL(input_alloc_absinfo);
+
+/**
  * input_grab_device - grabs device for exclusive use
  * @handle: input handle that wants to own the device
  *
@@ -567,6 +584,40 @@ static void input_disconnect_device(struct input_dev *dev)
 
 	spin_unlock_irq(&dev->event_lock);
 }
+
+/**
+ * input_scancode_to_scalar() - converts scancode in &struct input_keymap_entry
+ * @ke: keymap entry containing scancode to be converted.
+ * @scancode: pointer to the location where converted scancode should
+ *	be stored.
+ *
+ * This function is used to convert scancode stored in &struct keymap_entry
+ * into scalar form understood by legacy keymap handling methods. These
+ * methods expect scancodes to be represented as 'unsigned int'.
+ */
+int input_scancode_to_scalar(const struct input_keymap_entry *ke,
+			     unsigned int *scancode)
+{
+	switch (ke->len) {
+	case 1:
+		*scancode = *((u8 *)ke->scancode);
+		break;
+
+	case 2:
+		*scancode = *((u16 *)ke->scancode);
+		break;
+
+	case 4:
+		*scancode = *((u32 *)ke->scancode);
+		break;
+
+	default:
+		return -EINVAL;
+	}
+
+	return 0;
+}
+EXPORT_SYMBOL(input_scancode_to_scalar);
 
 static int input_fetch_keycode(struct input_dev *dev, int scancode)
 {
