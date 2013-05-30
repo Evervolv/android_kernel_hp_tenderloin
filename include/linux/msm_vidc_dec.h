@@ -227,12 +227,21 @@ struct vdec_ioctl_msg {
 #define VDEC_IOCTL_SET_CONT_ON_RECONFIG  \
 	_IO(VDEC_IOCTL_MAGIC, 34)
 
+ //TODO: NEEDED in Kernel??
+#define VDEC_IOCTL_SET_DISABLE_DMX \
+	_IOW(VDEC_IOCTL_MAGIC, 35, struct vdec_ioctl_msg)
+
+#define VDEC_IOCTL_GET_DISABLE_DMX_SUPPORT \
+	_IOR(VDEC_IOCTL_MAGIC, 37, struct vdec_ioctl_msg)
+ //TODO: NEEDED in Kernel??
+
 enum vdec_picture {
 	PICTURE_TYPE_I,
 	PICTURE_TYPE_P,
 	PICTURE_TYPE_B,
 	PICTURE_TYPE_BI,
 	PICTURE_TYPE_SKIP,
+	PICTURE_TYPE_IDR, //TODO: NEEDED in Kernel??
 	PICTURE_TYPE_UNKNOWN
 };
 
@@ -522,6 +531,8 @@ struct vdec_input_frameinfo {
 	void *client_data;
 	int pmem_fd;
 	size_t pmem_offset;
+	void __user *desc_addr; //TODO: NEEDED in Kernel??
+	uint32_t desc_size; //TODO: NEEDED in Kernel??
 };
 
 struct vdec_framesize {
@@ -529,6 +540,12 @@ struct vdec_framesize {
 	uint32_t   top;
 	uint32_t   right;
 	uint32_t   bottom;
+};
+
+struct vdec_aspectratioinfo {
+	uint32_t aspect_ratio;
+	uint32_t par_width;
+	uint32_t par_height;
 };
 
 struct vdec_output_frameinfo {
@@ -542,6 +559,7 @@ struct vdec_output_frameinfo {
 	void *input_frame_clientdata;
 	struct vdec_framesize framesize;
 	enum vdec_interlaced_format interlaced_format;
+	struct vdec_aspectratioinfo aspect_ratio_info; //TODO: NEEDED in Kernel??
 };
 
 union vdec_msgdata {
