@@ -37,6 +37,9 @@ struct gpio_event_info {
 		     void **data, unsigned int dev, unsigned int type,
 		     unsigned int code, int value); /* out events */
 	bool no_suspend;
+#ifdef CONFIG_OPTICALJOYSTICK_CRUCIAL
+	bool oj_btn;
+#endif
 };
 
 struct gpio_event_platform_data {
@@ -105,6 +108,7 @@ struct gpio_event_direct_entry {
 	uint32_t gpio:16;
 	uint32_t code:10;
 	uint32_t dev:6;
+	bool     not_wakeup_src;
 };
 
 /* inputs */
@@ -167,4 +171,19 @@ uint16_t gpio_axis_4bit_gray_map(
 uint16_t gpio_axis_5bit_singletrack_map(
 			struct gpio_event_axis_info *info, uint16_t in);
 
+/* switchs */
+extern int gpio_event_switch_func(struct gpio_event_input_devs *input_devs,
+			struct gpio_event_info *info, void **data, int func);
+struct gpio_event_switch_info {
+	/* initialize to gpio_event_switch_func */
+	struct gpio_event_info info;
+	ktime_t debounce_time;
+	ktime_t poll_time;
+	uint16_t flags;
+	uint16_t type;
+	const struct gpio_event_direct_entry *keymap;
+	size_t keymap_size;
+	void (*setup_switch_gpio)(void);
+	void (*set_qty_irq)(uint8_t);
+};
 #endif

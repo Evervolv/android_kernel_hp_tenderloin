@@ -96,6 +96,8 @@ extern int emmc_partition_read_proc(char *page, char **start, off_t off,
 extern int dying_processors_read_proc(char *page, char **start, off_t off,
 		int count, int *eof, void *data);
 
+extern int get_partition_num_by_name(char *name);
+
 #ifdef CONFIG_FB_MSM_HDMI_MHL
 typedef struct {
 	uint8_t format;
@@ -104,7 +106,6 @@ typedef struct {
 } mhl_driving_params;
 #endif
 
-#ifdef CONFIG_MSM_CAMERA
 enum msm_camera_csi_data_format {
 	CSI_8BIT,
 	CSI_10BIT,
@@ -189,16 +190,15 @@ struct camera_vreg_t {
 	int op_mode;
 };
 
+enum cam_vcm_onoff_type {
+	STATUS_OFF,
+	STATUS_ON,
+};
+
 enum htc_camera_image_type_board {
 	HTC_CAMERA_IMAGE_NONE_BOARD,
 	HTC_CAMERA_IMAGE_YUSHANII_BOARD,
 	HTC_CAMERA_IMAGE_MAX_BOARD,
 };
-
-enum cam_vcm_onoff_type {
-	STATUS_OFF,
-	STATUS_ON,
-};
-#endif /* CONFIG_MSM_CAMERA */
 
 #endif /* __ASM_ARCH_MSM_BOARD_EXT_HTC_H */

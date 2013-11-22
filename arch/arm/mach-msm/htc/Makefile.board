@@ -25,3 +25,9 @@ obj-$(CONFIG_MACH_M4_UL) += m4ul/
 
 # PYRAMID
 obj-$(CONFIG_MACH_PYRAMID) += pyramid/
+
+# VISION
+obj-$(CONFIG_MACH_VISION) += vision/
+
+# M7_UL
+obj-$(CONFIG_MACH_M7_UL) += m7ul/
