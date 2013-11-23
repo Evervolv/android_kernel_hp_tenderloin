@@ -65,7 +65,7 @@ static void lcdc_tenderloin_panel_set_backlight(struct msm_fb_data_type *mfd)
 
 	bl_level = mfd->bl_level;
 
-        printk(KERN_ERR "[DISP] %s: %d\n", __func__, bl_level);
+        printk(KERN_INFO "[DISP] %s: %d\n", __func__, bl_level);
 #ifdef CONFIG_PMIC8058_PWM
 	if (bl_pwm0) 
           {
