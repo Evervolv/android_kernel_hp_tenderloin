@@ -205,6 +205,9 @@ struct wm8994_pdata {
 	 * system.
 	 */
 	bool spkmode_pu;
+
+	unsigned int (*wm8994_setup)(void);
+	void (*wm8994_shutdown)(void);
 };
 
 #endif

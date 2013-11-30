@@ -195,6 +195,7 @@ static const char *wm8958_main_supplies[] = {
 static int wm8994_suspend(struct device *dev)
 {
 	struct wm8994 *wm8994 = dev_get_drvdata(dev);
+	struct wm8994_pdata *pdata = wm8994->dev->platform_data;
 	int ret;
 
 	/* Don't actually go through with the suspend if the CODEC is
@@ -288,6 +289,9 @@ static int wm8994_suspend(struct device *dev)
 
 	wm8994->suspended = true;
 
+	if (pdata->wm8994_shutdown)
+			pdata->wm8994_shutdown();
+
 	ret = regulator_bulk_disable(wm8994->num_supplies,
 				     wm8994->supplies);
 	if (ret != 0) {
@@ -301,11 +305,15 @@ static int wm8994_suspend(struct device *dev)
 static int wm8994_resume(struct device *dev)
 {
 	struct wm8994 *wm8994 = dev_get_drvdata(dev);
+	struct wm8994_pdata *pdata = wm8994->dev->platform_data;
 	int ret;
 
 	/* We may have lied to the PM core about suspending */
 	if (!wm8994->suspended)
 		return 0;
+
+	if (pdata->wm8994_setup)
+		pdata->wm8994_setup();
 
 	ret = regulator_bulk_enable(wm8994->num_supplies,
 				    wm8994->supplies);
@@ -405,6 +413,10 @@ static __devinit int wm8994_device_init(struct wm8994 *wm8994, int irq)
 		dev_err(wm8994->dev, "Failed to add children: %d\n", ret);
 		goto err;
 	}
+
+
+    if ((pdata)&&(pdata->wm8994_setup))
+		pdata->wm8994_setup();
 
 	switch (wm8994->type) {
 	case WM1811:
@@ -648,6 +660,8 @@ static __devinit int wm8994_device_init(struct wm8994 *wm8994, int irq)
 err_irq:
 	wm8994_irq_exit(wm8994);
 err_enable:
+    if ((pdata)&&(pdata->wm8994_shutdown))
+		pdata->wm8994_shutdown();
 	regulator_bulk_disable(wm8994->num_supplies,
 			       wm8994->supplies);
 err_get:
@@ -688,7 +702,8 @@ static __devinit int wm8994_i2c_probe(struct i2c_client *i2c,
 	i2c_set_clientdata(i2c, wm8994);
 	wm8994->dev = &i2c->dev;
 	wm8994->irq = i2c->irq;
-	wm8994->type = id->driver_data;
+//	wm8994->type = id->driver_data;
+    wm8994->type = WM8958;
 
 	wm8994->regmap = devm_regmap_init_i2c(i2c, &wm8994_base_regmap_config);
 	if (IS_ERR(wm8994->regmap)) {
