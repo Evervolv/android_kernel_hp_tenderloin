@@ -292,8 +292,8 @@ static int wm8994_suspend(struct device *dev)
 	if (pdata->wm8994_shutdown)
 			pdata->wm8994_shutdown();
 
-	ret = regulator_bulk_disable(wm8994->num_supplies,
-				     wm8994->supplies);
+	//ret = regulator_bulk_disable(wm8994->num_supplies,
+	//			     wm8994->supplies);
 	if (ret != 0) {
 		dev_err(dev, "Failed to disable supplies: %d\n", ret);
 		return ret;
@@ -315,11 +315,12 @@ static int wm8994_resume(struct device *dev)
 	if (pdata->wm8994_setup)
 		pdata->wm8994_setup();
 
-	ret = regulator_bulk_enable(wm8994->num_supplies,
-				    wm8994->supplies);
+	//ret = regulator_bulk_enable(wm8994->num_supplies,
+	//			    wm8994->supplies);
 	if (ret != 0) {
 		dev_err(dev, "Failed to enable supplies: %d\n", ret);
 		return ret;
+
 	}
 
 	regcache_cache_only(wm8994->regmap, false);
@@ -339,7 +340,7 @@ static int wm8994_resume(struct device *dev)
 	return 0;
 
 err_enable:
-	regulator_bulk_disable(wm8994->num_supplies, wm8994->supplies);
+	//regulator_bulk_disable(wm8994->num_supplies, wm8994->supplies);
 
 	return ret;
 }
@@ -418,48 +419,8 @@ static __devinit int wm8994_device_init(struct wm8994 *wm8994, int irq)
     if ((pdata)&&(pdata->wm8994_setup))
 		pdata->wm8994_setup();
 
-	switch (wm8994->type) {
-	case WM1811:
-		wm8994->num_supplies = ARRAY_SIZE(wm1811_main_supplies);
-		break;
-	case WM8994:
-		wm8994->num_supplies = ARRAY_SIZE(wm8994_main_supplies);
-		break;
-	case WM8958:
-		wm8994->num_supplies = ARRAY_SIZE(wm8958_main_supplies);
-		break;
-	default:
-		BUG();
-		goto err;
-	}
-
-	wm8994->supplies = devm_kzalloc(wm8994->dev,
-					sizeof(struct regulator_bulk_data) *
-					wm8994->num_supplies, GFP_KERNEL);
-	if (!wm8994->supplies) {
-		ret = -ENOMEM;
-		goto err;
-	}
-
-	switch (wm8994->type) {
-	case WM1811:
-		for (i = 0; i < ARRAY_SIZE(wm1811_main_supplies); i++)
-			wm8994->supplies[i].supply = wm1811_main_supplies[i];
-		break;
-	case WM8994:
-		for (i = 0; i < ARRAY_SIZE(wm8994_main_supplies); i++)
-			wm8994->supplies[i].supply = wm8994_main_supplies[i];
-		break;
-	case WM8958:
-		for (i = 0; i < ARRAY_SIZE(wm8958_main_supplies); i++)
-			wm8994->supplies[i].supply = wm8958_main_supplies[i];
-		break;
-	default:
-		BUG();
-		goto err;
-	}
 		
-	ret = regulator_bulk_get(wm8994->dev, wm8994->num_supplies,
+	/*ret = regulator_bulk_get(wm8994->dev, wm8994->num_supplies,
 				 wm8994->supplies);
 	if (ret != 0) {
 		dev_err(wm8994->dev, "Failed to get supplies: %d\n", ret);
@@ -471,7 +432,7 @@ static __devinit int wm8994_device_init(struct wm8994 *wm8994, int irq)
 	if (ret != 0) {
 		dev_err(wm8994->dev, "Failed to enable supplies: %d\n", ret);
 		goto err_get;
-	}
+	}*/
 
 	ret = wm8994_reg_read(wm8994, WM8994_SOFTWARE_RESET);
 	if (ret < 0) {
@@ -662,10 +623,10 @@ err_irq:
 err_enable:
     if ((pdata)&&(pdata->wm8994_shutdown))
 		pdata->wm8994_shutdown();
-	regulator_bulk_disable(wm8994->num_supplies,
-			       wm8994->supplies);
+	//regulator_bulk_disable(wm8994->num_supplies,
+	//		       wm8994->supplies);
 err_get:
-	regulator_bulk_free(wm8994->num_supplies, wm8994->supplies);
+	//regulator_bulk_free(wm8994->num_supplies, wm8994->supplies);
 err:
 	mfd_remove_devices(wm8994->dev);
 	return ret;
@@ -676,9 +637,9 @@ static __devexit void wm8994_device_exit(struct wm8994 *wm8994)
 	pm_runtime_disable(wm8994->dev);
 	mfd_remove_devices(wm8994->dev);
 	wm8994_irq_exit(wm8994);
-	regulator_bulk_disable(wm8994->num_supplies,
-			       wm8994->supplies);
-	regulator_bulk_free(wm8994->num_supplies, wm8994->supplies);
+	//regulator_bulk_disable(wm8994->num_supplies,
+	//		       wm8994->supplies);
+	//regulator_bulk_free(wm8994->num_supplies, wm8994->supplies);
 }
 
 static const struct of_device_id wm8994_of_match[] = {
