@@ -41,15 +41,6 @@
 #include "../codecs/wm8994.h"
 #include <linux/mfd/wm8994/registers.h>
 #include <linux/mfd/wm8994/pdata.h>
-#include <sound/pcm_params.h>
-
-#define WM_FS 48000
-#define WM_CHANNELS 2
-#define WM_BITS 16
-#define WM_FLL_MULT 8 /* 2*16*8 = 256, clock rates must be >= 256*fs */
-#define WM_BCLK (WM_FS * WM_CHANNELS * WM_BITS) /* 1.536MHZ */
-#define WM_FLL (WM_FLL_MULT * WM_BCLK) /* 12.288 MHZ */
-#define WM_FLL_MIN_RATE 4096000 /* The minimum clk rate required for AIF's */
 #endif
 
 static struct platform_device *msm_audio_snd_device;
@@ -356,89 +347,6 @@ static int msm_device_info(struct snd_kcontrol *kcontrol,
 	return 0;
 }
 
-#if defined(CONFIG_MFD_WM8994)
-static int configure_wm_hw(struct msm_snddev_info *dev_info)
-{
-	int rc = 0;
-
-	/* if device is internal pcm, then configure wolfson codec */
-	if (dev_info->copp_id == PRIMARY_I2S_RX || dev_info->copp_id == PRIMARY_I2S_TX) {
-		struct snd_pcm_substream substream;
-		struct snd_pcm_hw_params params;
-		struct snd_soc_dai *codec_dai;
-		struct wm8994_priv *wm8994;
-		int fll = 0, fll_sysclk = 0, fll_rate = 0;
-		int aifclk = 0;
-		int bclk_rate = 0;
-		static int bclk_rate_tx = 0, bclk_rate_rx = 0;
-
-		if (dev_info->capability & SNDDEV_CAP_RX) {
-			codec_dai = &wm8994_dai[0];
-			substream.stream = SNDRV_PCM_STREAM_PLAYBACK;
-			fll = WM8994_FLL1;
-			fll_sysclk = WM8994_SYSCLK_FLL1;
-			aifclk = WM8994_AIF1_CLOCKING_1;
-		} else {
-			codec_dai = &wm8994_dai[1];
-			substream.stream = SNDRV_PCM_STREAM_CAPTURE;
-			fll = WM8994_FLL2;
-			fll_sysclk = WM8994_SYSCLK_FLL2;
-			aifclk = WM8994_AIF2_CLOCKING_1;
-		}
-
-		wm8994 = snd_soc_codec_get_drvdata (codec_dai->codec);
-
-		params.intervals[SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL].min = dev_info->channel_mode;
-		params.intervals[SNDRV_PCM_HW_PARAM_CHANNELS - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL].max = dev_info->channel_mode;
-		params.intervals[SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL].min = dev_info->sample_rate;
-		params.intervals[SNDRV_PCM_HW_PARAM_RATE - SNDRV_PCM_HW_PARAM_FIRST_INTERVAL].max = dev_info->sample_rate;
-		snd_mask_set(&params.masks[SNDRV_PCM_HW_PARAM_FORMAT - SNDRV_PCM_HW_PARAM_FIRST_MASK], SNDRV_PCM_FORMAT_S16_LE);
-
-		/* Set fll rate by multiplying 2 channels even if its mono
-		 * aifclk rates need to be atleast 256*fs, 1 channel would make it 128*fs
-		 * also, must be >= 4.096Mhz and <= 12.5Mhz, refer to datasheet.
-		 */
-		bclk_rate = dev_info->sample_rate * WM_CHANNELS * WM_BITS;
-
-		if (dev_info->capability & SNDDEV_CAP_RX) {
-			if (bclk_rate_rx == bclk_rate) {
-				pr_info("aif1 codec rates are already configured, just return\n");
-				return rc;
-			}
-			bclk_rate_rx = bclk_rate;
-		} else {
-			if (bclk_rate_tx == bclk_rate) {
-				pr_info("aif2 codec rates are already configured, just return\n");
-				return rc;
-			}
-			bclk_rate_tx = bclk_rate;
-		}
-
-		fll_rate = bclk_rate * WM_FLL_MULT;
-		if (fll_rate < WM_FLL_MIN_RATE)
-			fll_rate = WM_FLL_MIN_RATE;
-
-		/* aif clocks are disabled when reconfiguring fll and bclk rates */
-		rc = snd_soc_dai_set_pll(codec_dai, fll, WM8994_FLL_SRC_BCLK, bclk_rate, fll_rate);
-		if (rc < 0) {
-			pr_err("Failed to set DAI FLL to rate %d: ret %d\n", WM_FLL_MULT * bclk_rate, rc);
-			return rc;
-		}
-
-		rc = snd_soc_dai_set_sysclk(codec_dai, fll_sysclk,
-						fll_rate, 0);
-		if (rc < 0) {
-			pr_err("Failed to set sysclk: ret %d\n", rc);
-			return rc;
-		}
-
-		wm8994_hw_params(&substream, &params, codec_dai);
-	}
-
-	return rc;
-}
-#endif
-
 static int msm_device_put(struct snd_kcontrol *kcontrol,
 			struct snd_ctl_elem_value *ucontrol)
 {
@@ -521,10 +429,6 @@ static int msm_device_put(struct snd_kcontrol *kcontrol,
 					loopback_status = 1;
 				}
 			}
-#if defined(CONFIG_MFD_WM8994)
-			if (configure_wm_hw(dev_info))
-				pr_err("%s: Could not configure wolfson hw properly!", __func__);
-#endif
 		}
 	} else {
 		if (dev_info->opened) {
@@ -1308,63 +1212,47 @@ static int msm_soc_dai_init(
 	init_waitqueue_head(&the_locks.read_wait);
 	memset(&session_route, DEVICE_IGNORE, sizeof(struct pcm_session));
 
+#if defined(CONFIG_MACH_TENDERLOIN)
+	snd_soc_dapm_new_controls(dapm, tenderloin_dapm_widgets,
+				ARRAY_SIZE(tenderloin_dapm_widgets));
+
+	snd_soc_dapm_add_routes(dapm, tenderloin_dapm_routes,
+				ARRAY_SIZE(tenderloin_dapm_routes));
+#endif
+
+
 	ret = msm_new_mixer(codec);
 	if (ret < 0)
 		pr_err("%s: ALSA MSM Mixer Fail\n", __func__);
-
-
-	// permanently disable pin
-		snd_soc_dapm_nc_pin(dapm, "SPKOUTRN");
-		snd_soc_dapm_nc_pin(dapm, "SPKOUTRP");
-		snd_soc_dapm_nc_pin(dapm, "SPKOUTLN");
-		snd_soc_dapm_nc_pin(dapm, "SPKOUTLP");
-		snd_soc_dapm_nc_pin(dapm, "HPOUT2P");
-		snd_soc_dapm_nc_pin(dapm, "HPOUT2N");
-		snd_soc_dapm_nc_pin(dapm, "IN2RP:VXRP");
-		snd_soc_dapm_nc_pin(dapm, "IN2RN");
-		snd_soc_dapm_nc_pin(dapm, "IN2LN");
-		snd_soc_dapm_nc_pin(dapm, "IN1RN");
-		snd_soc_dapm_nc_pin(dapm, "IN1RP");
-		snd_soc_dapm_nc_pin(dapm, "IN1LN");
 
 	return ret;
 }
 
 #if defined(CONFIG_MACH_TENDERLOIN)
+static int tendorloin_hw_params(struct snd_pcm_substream *substream,
+                           struct snd_pcm_hw_params *params)
+{
+	struct snd_soc_pcm_runtime *rtd = substream->private_data;
+	struct snd_soc_dai *codec_dai = rtd->codec_dai;
+	int ret;
 
-static struct snd_soc_codec_conf wm8994_codec_conf[] = {
-	{
-		.dev_name = "wm8994",
-		.name_prefix = "Sub",
-	},
+	ret = snd_soc_dai_set_fmt(codec_dai, SND_SOC_DAIFMT_CBS_CFS |
+		SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF);
+
+	if (ret != 0) {
+		pr_err("Failed to set DAI format: %d\n", ret);
+		return ret;
+	}
+
+	return 0;
+}
+
+
+
+static struct snd_soc_ops tenderloin_ops = {
+	.hw_params = tendorloin_hw_params,
 };
-
-static struct snd_soc_dai_link msm_dai[] = {
-	{
-		.name = "Media Playback",
-		.stream_name = "Media Playback",
-		.cpu_dai_name = "msm-cpu-dai.0",
-		.codec_dai_name = "wm8994-aif1",
-		.platform_name = "msm-dsp-audio.0",
-		.codec_name = "wm8994-codec",
-		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
-						| SND_SOC_DAIFMT_CBS_CFS,
-		.init   = msm_soc_dai_init,
-	},
-	{
-		.name = "Media Capture",
-		.stream_name = "Media Capture",
-		.cpu_dai_name = "msm-cpu-dai.0",
-		.codec_dai_name = "wm8994-aif2",
-		.platform_name = "msm-dsp-audio.0",
-		.codec_name = "wm8994-codec",
-		.dai_fmt = SND_SOC_DAIFMT_I2S | SND_SOC_DAIFMT_NB_NF
-								| SND_SOC_DAIFMT_CBS_CFS,
-	},
-};
-
-
-#else
+#endif
 
 static struct snd_soc_dai_link msm_dai[] = {
 {
@@ -1388,21 +1276,10 @@ static struct snd_soc_dai_link msm_dai[] = {
 #endif
 };
 
-#endif //tenderloin
-
 static struct snd_soc_card snd_soc_card_msm = {
 	.name		= "msm-audio",
-	.owner = THIS_MODULE,
 	.dai_link	= msm_dai,
 	.num_links = ARRAY_SIZE(msm_dai),
-#if defined(CONFIG_MACH_TENDERLOIN)
-	.codec_conf = wm8994_codec_conf,
-	.num_configs = ARRAY_SIZE(wm8994_codec_conf),
-	.dapm_widgets = tenderloin_dapm_widgets,
-	.num_dapm_widgets = ARRAY_SIZE(tenderloin_dapm_widgets),
-	.dapm_routes = tenderloin_dapm_routes,
-	.num_dapm_routes = ARRAY_SIZE(tenderloin_dapm_routes),
-#endif
 };
 
 static int __init msm_audio_init(void)
