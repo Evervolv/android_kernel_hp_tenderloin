@@ -1753,15 +1753,10 @@ SND_SOC_DAPM_AIF_IN_E("AIF2DACR", NULL, 0,
 		      SND_SOC_NOPM, 12, 0, wm8958_aif_ev,
 		      SND_SOC_DAPM_POST_PMU | SND_SOC_DAPM_PRE_PMD),
 
-/*SND_SOC_DAPM_AIF_IN("AIF1DACDAT", NULL, 0, SND_SOC_NOPM, 0, 0),
+SND_SOC_DAPM_AIF_IN("AIF1DACDAT", NULL, 0, SND_SOC_NOPM, 0, 0),
 SND_SOC_DAPM_AIF_IN("AIF2DACDAT", NULL, 0, SND_SOC_NOPM, 0, 0),
 SND_SOC_DAPM_AIF_OUT("AIF1ADCDAT", NULL, 0, SND_SOC_NOPM, 0, 0),
-SND_SOC_DAPM_AIF_OUT("AIF2ADCDAT",  NULL, 0, SND_SOC_NOPM, 0, 0),*/
-SND_SOC_DAPM_AIF_IN("AIF1DACDAT", "AIF1 Playback", 0, SND_SOC_NOPM, 0, 0),
-SND_SOC_DAPM_AIF_IN("AIF2DACDAT", "AIF2 Playback", 0, SND_SOC_NOPM, 0, 0),
-SND_SOC_DAPM_AIF_OUT("AIF1ADCDAT", "AIF1 Capture", 0, SND_SOC_NOPM, 0, 0),
-SND_SOC_DAPM_AIF_OUT("AIF2ADCDAT", "AIF2 Capture", 0, SND_SOC_NOPM, 0, 0),
-
+SND_SOC_DAPM_AIF_OUT("AIF2ADCDAT",  NULL, 0, SND_SOC_NOPM, 0, 0),
 
 SND_SOC_DAPM_MUX("AIF1DAC Mux", SND_SOC_NOPM, 0, 0, &aif1dac_mux),
 SND_SOC_DAPM_MUX("AIF2DAC Mux", SND_SOC_NOPM, 0, 0, &aif2dac_mux),
@@ -1883,13 +1878,13 @@ static const struct snd_soc_dapm_route intercon[] = {
 
 	{ "TOCLK", NULL, "CLK_SYS" },
 
-	/*{ "AIF1DACDAT", NULL, "AIF1 Playback" },
+	{ "AIF1DACDAT", NULL, "AIF1 Playback" },
 	{ "AIF2DACDAT", NULL, "AIF2 Playback" },
-	{ "AIF3DACDAT", NULL, "AIF3 Playback" },*/
+	{ "AIF3DACDAT", NULL, "AIF3 Playback" },
 
-	/*{ "AIF1 Capture", NULL, "AIF1ADCDAT" },
+	{ "AIF1 Capture", NULL, "AIF1ADCDAT" },
 	{ "AIF2 Capture", NULL, "AIF2ADCDAT" },
-	{ "AIF3 Capture", NULL, "AIF3ADCDAT" },*/
+	{ "AIF3 Capture", NULL, "AIF3ADCDAT" },
 
 	/* AIF1 outputs */
 	{ "AIF1ADC1L", NULL, "AIF1ADC1L Mixer" },
@@ -2649,7 +2644,7 @@ static int bclk_divs[] = {
 	640, 880, 960, 1280, 1760, 1920
 };
 
-int wm8994_hw_params(struct snd_pcm_substream *substream,
+static int wm8994_hw_params(struct snd_pcm_substream *substream,
 			    struct snd_pcm_hw_params *params,
 			    struct snd_soc_dai *dai)
 {
@@ -2808,7 +2803,6 @@ int wm8994_hw_params(struct snd_pcm_substream *substream,
 
 	return 0;
 }
-EXPORT_SYMBOL_GPL(wm8994_hw_params);
 
 static int wm8994_aif3_hw_params(struct snd_pcm_substream *substream,
 				 struct snd_pcm_hw_params *params,
@@ -2983,7 +2977,7 @@ static const struct snd_soc_dai_ops wm8994_aif3_dai_ops = {
 	.set_tristate	= wm8994_set_tristate,
 };
 
-struct snd_soc_dai_driver wm8994_dai[] = {
+static struct snd_soc_dai_driver wm8994_dai[] = {
 	{
 		.name = "wm8994-aif1",
 		.id = 1,
@@ -3810,10 +3804,10 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 		wm8994->micdet_irq = wm8994->pdata->micdet_irq;
 	else if (wm8994->pdata && wm8994->pdata->irq_base)
 		wm8994->micdet_irq = wm8994->pdata->irq_base +
-					   WM8994_IRQ_MIC1_DET;
+				     WM8994_IRQ_MIC1_DET;
 
-	//pm_runtime_enable(codec->dev);
-	//pm_runtime_idle(codec->dev);
+	pm_runtime_enable(codec->dev);
+	pm_runtime_idle(codec->dev);
 
 	/* By default use idle_bias_off, will override for WM8994 */
 	codec->dapm.idle_bias_off = 1;
@@ -3968,10 +3962,8 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 			wm8994->fll_locked_irq = false;
 	}
 
-
-
 	/* Make sure we can read from the GPIOs if they're inputs */
-	//pm_runtime_get_sync(codec->dev);
+	pm_runtime_get_sync(codec->dev);
 
 	/* Remember if AIFnLRCLK is configured as a GPIO.  This should be
 	 * configured on init - if a system wants to do this dynamically
@@ -4001,7 +3993,7 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 		wm8994->lrclk_shared[1] = 0;
 	}
 
-	//pm_runtime_put(codec->dev);
+	pm_runtime_put(codec->dev);
 
 	/* Latch volume update bits */
 	for (i = 0; i < ARRAY_SIZE(wm8994_vu_bits); i++)
@@ -4047,6 +4039,7 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 	}
 
 	wm8994_update_class_w(codec);
+
 	wm8994_handle_pdata(wm8994);
 
 	wm_hubs_add_analogue_controls(codec);
@@ -4111,9 +4104,9 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 		break;
 	}
 
-	wm_hubs_add_analogue_routes(codec, 1, 1);
-	snd_soc_dapm_add_routes(dapm, intercon, ARRAY_SIZE(intercon));
 
+	wm_hubs_add_analogue_routes(codec, 0, 0);
+	snd_soc_dapm_add_routes(dapm, intercon, ARRAY_SIZE(intercon));
 
 	switch (control->type) {
 	case WM8994:
@@ -4144,7 +4137,6 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 		}*/
 
 		wm8958_dsp2_init(codec);
-
 		break;
 	case WM1811:
 		snd_soc_dapm_add_routes(dapm, wm8994_lateclk_intercon,
@@ -4159,22 +4151,21 @@ static int wm8994_codec_probe(struct snd_soc_codec *codec)
 err_irq:
 	if (wm8994->jackdet)
 		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_GPIO(6), wm8994);
-		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_MIC2_SHRT, wm8994);
-		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_MIC2_DET, wm8994);
-		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_MIC1_SHRT, wm8994);
+	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_MIC2_SHRT, wm8994);
+	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_MIC2_DET, wm8994);
+	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_MIC1_SHRT, wm8994);
 	if (wm8994->micdet_irq)
 		free_irq(wm8994->micdet_irq, wm8994);
 	for (i = 0; i < ARRAY_SIZE(wm8994->fll_locked); i++)
 		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_FLL1_LOCK + i,
-			&wm8994->fll_locked[i]);
-		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_DCS_DONE,
+				&wm8994->fll_locked[i]);
+	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_DCS_DONE,
 			&wm8994->hubs);
-		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_FIFOS_ERR, codec);
-		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_TEMP_SHUT, codec);
-		wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_TEMP_WARN, codec);
+	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_FIFOS_ERR, codec);
+	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_TEMP_SHUT, codec);
+	wm8994_free_irq(wm8994->wm8994, WM8994_IRQ_TEMP_WARN, codec);
 
-	return -1;
-
+	return ret;
 }
 
 static int  wm8994_codec_remove(struct snd_soc_codec *codec)
