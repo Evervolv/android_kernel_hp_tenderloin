@@ -362,28 +362,20 @@ void *pil_get(const char *name)
 	struct pil_device *pil_d;
 	void *retval;
 
-	if (!name){
-	if((!strcmp (name,"q6")))
-		printk("FLT is null");
+	if (!name)
 		return NULL;
-	}
+
 	pil = retval = find_peripheral(name);
-	if (!pil){
-		if((!strcmp (name,"q6")))
-				printk("FLT is pil = null or -1");
+	if (!pil)
 		return ERR_PTR(-ENODEV);
-	}
+
 	if (!try_module_get(pil->owner)) {
-		if((!strcmp (name,"q6")))
-				printk("FLT try_module_get");
 		put_device(&pil->dev);
 		return ERR_PTR(-ENODEV);
 	}
 
 	pil_d = pil_get(pil->desc->depends_on);
 	if (IS_ERR(pil_d)) {
-		if((!strcmp (name,"q6")))
-				printk("FLT pil_d is null");
 		retval = pil_d;
 		goto err_depends;
 	}
@@ -392,8 +384,6 @@ void *pil_get(const char *name)
 	if (!pil->count) {
 		ret = load_image(pil);
 		if (ret) {
-			if((!strcmp (name,"q6")))
-					printk("FLT no load image");
 			retval = ERR_PTR(ret);
 			goto err_load;
 		}
