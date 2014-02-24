@@ -463,7 +463,6 @@ struct snd_pcm {
 	struct mutex open_mutex;
 	wait_queue_head_t open_wait;
 	void *private_data;
-	bool internal; /* pcm is for internal use only */
 	void (*private_free) (struct snd_pcm *pcm);
 	struct device *dev; /* actual hw device this belongs to */
 #if defined(CONFIG_SND_PCM_OSS) || defined(CONFIG_SND_PCM_OSS_MODULE)
