@@ -12,6 +12,7 @@
  */
 
 #include <linux/regulator/pmic8901-regulator.h>
+#include <linux/regulator/msm-gpio-regulator.h>
 #include <mach/rpm-regulator.h>
 
 #include "board-tenderloin.h"
@@ -298,6 +299,75 @@ VREG_CONSUMERS(PM8901_S4_PC) = {
 #define LDO300HMIN	RPM_VREG_8660_LDO_300_HPM_MIN_LOAD
 #define SMPS_HMIN	RPM_VREG_8660_SMPS_HPM_MIN_LOAD
 #define FTS_HMIN	RPM_VREG_8660_FTSMPS_HPM_MIN_LOAD
+
+#define GPIO_VREG_ID_EXT_5V		0
+
+static struct regulator_consumer_supply vreg_consumers_EXT_5V[] = {
+	REGULATOR_SUPPLY("ext_5v",	NULL),
+	REGULATOR_SUPPLY("8901_mpp0",	NULL),
+};
+
+#define GPIO_VREG_INIT(_id, _reg_name, _gpio_label, _gpio, _active_low) \
+	[GPIO_VREG_ID_##_id] = { \
+		.init_data = { \
+			.constraints = { \
+				.valid_ops_mask	= REGULATOR_CHANGE_STATUS, \
+			}, \
+			.num_consumer_supplies	= \
+					ARRAY_SIZE(vreg_consumers_##_id), \
+			.consumer_supplies	= vreg_consumers_##_id, \
+		}, \
+		.regulator_name	= _reg_name, \
+		.active_low	= _active_low, \
+		.gpio_label	= _gpio_label, \
+		.gpio		= _gpio, \
+	}
+
+/* GPIO regulator constraints */
+static struct gpio_regulator_platform_data msm_gpio_regulator_pdata[] = {
+	GPIO_VREG_INIT(EXT_5V, "ext_5v", "ext_5v_en",
+					PM8901_MPP_PM_TO_SYS(0), 0),
+};
+
+/* GPIO regulator */
+struct platform_device tenderloin_8901_mpp_vreg __devinitdata = {
+	.name	= GPIO_REGULATOR_DEV_NAME,
+	.id	= PM8901_MPP_PM_TO_SYS(0),
+	.dev	= {
+		.platform_data =
+			&msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_5V],
+	},
+};
+
+struct pm8xxx_mpp_init_info {
+       unsigned mpp;
+       struct pm8xxx_mpp_config_data config;
+};
+
+void __init tenderloin_pm8901_vreg_mpp_init(void)
+{
+	int rc;
+
+	struct pm8xxx_mpp_init_info pm8901_vreg_mpp0 = {
+		.mpp	= PM8901_MPP_PM_TO_SYS(0),
+		.config =  {
+			.type	= PM8XXX_MPP_TYPE_D_OUTPUT,
+			.level	= PM8901_MPP_DIG_LEVEL_VPH,
+		},
+	};
+
+	/*
+	 * Set PMIC 8901 MPP0 active_high to 0 for surf and charm_surf. This
+	 * implies that the regulator connected to MPP0 is enabled when
+	 * MPP0 is low.
+	 */
+	msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_5V].active_low = 1;
+	pm8901_vreg_mpp0.config.control = PM8XXX_MPP_DOUT_CTRL_HIGH;
+
+	rc = pm8xxx_mpp_config(pm8901_vreg_mpp0.mpp, &pm8901_vreg_mpp0.config);
+	if (rc)
+		pr_err("%s: pm8xxx_mpp_config: rc=%d\n", __func__, rc);
+}
 
 /* RPM early regulator constraints */
 static struct rpm_regulator_init_data rpm_regulator_early_init_data[] __devinitdata = {

@@ -284,7 +284,18 @@ notify_vbus_state notify_vbus_state_func_ptr;
 
 #ifdef CONFIG_USB_EHCI_MSM_72K
 #define USB_PMIC_ID_DET_DELAY	msecs_to_jiffies(100)
+static int pmic_id_notif_supported;
 struct delayed_work pmic_id_det;
+
+static int __init usb_id_pin_rework_setup(char *support)
+{
+	if (strncmp(support, "true", 4) == 0)
+		pmic_id_notif_supported = 1;
+
+	return 1;
+}
+__setup("usb_id_pin_rework=", usb_id_pin_rework_setup);
+
 static void pmic_id_detect(struct work_struct *w)
 {
 	int val = gpio_get_value_cansleep(PM8058_GPIO_PM_TO_SYS(36));
@@ -304,6 +315,31 @@ static irqreturn_t pmic_id_on_irq(int irq, void *data)
 	schedule_delayed_work(&pmic_id_det, USB_PMIC_ID_DET_DELAY);
 
 	return IRQ_HANDLED;
+}
+
+static int msm_hsusb_phy_id_setup_init(int init)
+{
+	unsigned ret;
+
+	struct pm8xxx_mpp_config_data hsusb_phy_mpp = {
+		.type	= PM8XXX_MPP_TYPE_D_OUTPUT,
+		.level	= PM8901_MPP_DIG_LEVEL_L5,
+	};
+
+	if (init) {
+		hsusb_phy_mpp.control = PM8XXX_MPP_DOUT_CTRL_HIGH;
+		ret = pm8xxx_mpp_config(PM8901_MPP_PM_TO_SYS(1),
+							&hsusb_phy_mpp);
+		if (ret < 0)
+			pr_err("%s:MPP2 configuration failed\n", __func__);
+	} else {
+		hsusb_phy_mpp.control = PM8XXX_MPP_DOUT_CTRL_LOW;
+		ret = pm8xxx_mpp_config(PM8901_MPP_PM_TO_SYS(1),
+							&hsusb_phy_mpp);
+		if (ret < 0)
+			pr_err("%s:MPP2 un config failed\n", __func__);
+	}
+	return ret;
 }
 
 static int msm_hsusb_pmic_id_notif_init(void (*callback)(int online), int init)
@@ -541,7 +577,6 @@ static int msm_hsusb_ldo_enable(int on)
 static void msm_hsusb_vbus_power(unsigned phy_info, int on)
 {
 	static struct regulator *votg_5v_switch;
-	static struct regulator *ext_5v_reg;
 	static int vbus_is_on;
 
 	/* If VBUS is already on (or off), do nothing. */
@@ -552,22 +587,11 @@ static void msm_hsusb_vbus_power(unsigned phy_info, int on)
 		votg_5v_switch = regulator_get(NULL, "8901_usb_otg");
 		if (IS_ERR(votg_5v_switch)) {
 			pr_err("%s: unable to get votg_5v_switch\n", __func__);
-			return;
-		}
-	}
-	if (!ext_5v_reg) {
-		ext_5v_reg = regulator_get(NULL, "8901_mpp0");
-		if (IS_ERR(ext_5v_reg)) {
-			pr_err("%s: unable to get ext_5v_reg\n", __func__);
+			votg_5v_switch = NULL;
 			return;
 		}
 	}
 	if (on) {
-		if (regulator_enable(ext_5v_reg)) {
-			pr_err("%s: Unable to enable the regulator:"
-					" ext_5v_reg\n", __func__);
-			return;
-		}
 		if (regulator_enable(votg_5v_switch)) {
 			pr_err("%s: Unable to enable the regulator:"
 					" votg_5v_switch\n", __func__);
@@ -577,9 +601,6 @@ static void msm_hsusb_vbus_power(unsigned phy_info, int on)
 		if (regulator_disable(votg_5v_switch))
 			pr_err("%s: Unable to enable the regulator:"
 				" votg_5v_switch\n", __func__);
-		if (regulator_disable(ext_5v_reg))
-			pr_err("%s: Unable to enable the regulator:"
-				" ext_5v_reg\n", __func__);
 	}
 
 	vbus_is_on = on;
@@ -600,9 +621,11 @@ static struct msm_otg_platform_data msm_otg_pdata = {
 	.pemp_level		 = PRE_EMPHASIS_WITH_20_PERCENT,
 	.cdr_autoreset		 = CDR_AUTO_RESET_DISABLE,
 	.se1_gating		 = SE1_GATING_DISABLE,
+	.bam_disable		 = 1,
 	.hsdrvslope		 = 0x05,
 #ifdef CONFIG_USB_EHCI_MSM_72K
 	.pmic_id_notif_init = msm_hsusb_pmic_id_notif_init,
+	.phy_id_setup_init = msm_hsusb_phy_id_setup_init,
 #endif
 #ifdef CONFIG_USB_EHCI_MSM_72K
 	.vbus_power = msm_hsusb_vbus_power,
@@ -632,6 +655,13 @@ static struct msm_hsusb_gadget_platform_data msm_gadget_pdata = {
 
 void __init tenderloin_usb_i2c_init(void)
 {
+	if (SOCINFO_VERSION_MAJOR(socinfo_get_version()) == 2 &&
+			(machine_is_msm8x60_surf() ||
+			(machine_is_msm8x60_ffa() &&
+			pmic_id_notif_supported))){
+		printk("FLINTMAN  can powercollapse\n");
+		msm_otg_pdata.phy_can_powercollapse = 1;
+	}
 	msm_device_otg.dev.platform_data = &msm_otg_pdata;
 
 #ifdef CONFIG_USB_GADGET_MSM_72K

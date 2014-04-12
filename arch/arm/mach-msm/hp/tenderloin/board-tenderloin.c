@@ -156,11 +156,6 @@
 #include <mach/ion.h>
 #include <mach/msm_rtb.h>
 
-struct pm8xxx_mpp_init_info {
-	unsigned			mpp;
-	struct pm8xxx_mpp_config_data	config;
-};
-
 extern int ps_type;
 int *pin_table = NULL;
 int wm8994_reg_status = 0;
@@ -3384,15 +3379,14 @@ static void __init tenderloin_init(void)
 	platform_add_devices(tenderloin_devices,
 			     ARRAY_SIZE(tenderloin_devices));
 
-        tenderloin_init_fb();
+    tenderloin_init_fb();
 
 	lcdc_lg_panel_power(1);
-        //        return 0;
-        //        tenderloin_gpio_mpp_init();
-        tenderloin_usb_init();
-
+    tenderloin_gpio_mpp_init();
+    tenderloin_usb_init();
+    platform_device_register(&tenderloin_8901_mpp_vreg);
 #ifdef CONFIG_MSM_DSPS
-		msm8x60_init_dsps();
+	msm8x60_init_dsps();
 #endif
 #ifdef CONFIG_MAX8903B_CHARGER
 	//reverse the polarity of the max8903b USUS_pin on TopazWifi from DVT1 hwbuild
