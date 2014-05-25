@@ -3125,7 +3125,6 @@ static void __init register_i2c_devices(void)
 }
 
 #ifdef CONFIG_SERIAL_MSM_HS
-#if 0
 static int configure_uart_gpios(int on)
 {
 	int ret = 0;
@@ -3135,11 +3134,10 @@ static int configure_uart_gpios(int on)
 
 	return ret;
 }
-#endif
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
 	.inject_rx_on_wakeup = 1,
 	.rx_to_inject = 0xFD,
-        //        .gpio_config = configure_uart_gpios,
+	.gpio_config = configure_uart_gpios,
 };
 #endif
 
