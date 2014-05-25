@@ -31,12 +31,12 @@ void max8903b_set_vbus_draw (unsigned ma);
 
 
 static struct resource isp1763_resources[] = {
-	{
+	[0] = {
 		.flags	= IORESOURCE_MEM,
 		.start	= ISP176x_MEM_BASE,
 		.end	= (ISP176x_MEM_BASE + ISP176x_MEM_RANGE - 1),		/* 24KB */
 	},
-	{
+	[1] = {
 		.flags	= IORESOURCE_IRQ,
 		.start	= ISP176x_IRQ_NUM,
 		.end	= ISP176x_IRQ_NUM,
@@ -118,7 +118,6 @@ static struct platform_device isp1763_device = {
 */
 static int isp1763_modem_gpio_init(int on)
 {
-#if 0
 	int rc;
 	static int gpio_requested=0;
 
@@ -171,7 +170,6 @@ static int isp1763_modem_gpio_init(int on)
 		gpio_set_value(GPIO_3G_DISABLE_N, 1);
 	}
 
-#endif
 	return 0;
 }
 
@@ -241,6 +239,7 @@ out_free_resources:
 	return ret;
 }
 #endif /* CONFIG_USB_PEHCI_HCD */
+
 #ifdef CONFIG_MDMGPIO
 static int set_gpio_value(int gpionum, int value)
 {
