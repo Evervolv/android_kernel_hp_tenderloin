@@ -791,7 +791,7 @@ phci_hcd_qh_append_tds(phci_hcd	* hcd,
 	qh = (struct ehci_qh *)	*ptr;
 	if (likely(qh != 0)) {
 		u32 hw_next = QTD_NEXT(qtd->qtd_dma);
-		pehci_print("%Queue head already %p\n",	qh);
+		pehci_print("Queue head already %p\n",	qh);
 
 		ptd_map_buff = &(td_ptd_map_buff[qh->type]);
 		td_ptd_map = &ptd_map_buff->map_list[qh->qtd_ptd_index];
