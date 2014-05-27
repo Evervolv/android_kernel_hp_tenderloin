@@ -1492,7 +1492,7 @@ tenderloin_3g_gpiomux_cfgs[] __initdata = {
 	{msm8x60_bt_configs_3g, ARRAY_SIZE(msm8x60_bt_configs_3g)},
 	{msm8x60_wlan_configs_3g, ARRAY_SIZE(msm8x60_wlan_configs_3g)},
 	{msm8x60_lcdc_configs, ARRAY_SIZE(msm8x60_lcdc_configs)},
-	{msm8x60_mdp_vsync_configs, ARRAY_SIZE(msm8x60_mdp_vsync_configs)},
+	//{msm8x60_mdp_vsync_configs, ARRAY_SIZE(msm8x60_mdp_vsync_configs)},
 	{msm8x60_sensor_cfgs_3g, ARRAY_SIZE(msm8x60_sensor_cfgs_3g)},
 	{msm8x60_lighting_cfgs_3g, ARRAY_SIZE(msm8x60_lighting_cfgs_3g)},
 
@@ -1574,7 +1574,7 @@ tenderloin_3g_dvt_gpiomux_cfgs[] __initdata = {
 	{msm8x60_bt_configs_3g, ARRAY_SIZE(msm8x60_bt_configs_3g)},
 	{msm8x60_wlan_configs_3g, ARRAY_SIZE(msm8x60_wlan_configs_3g)},
 	{msm8x60_lcdc_configs, ARRAY_SIZE(msm8x60_lcdc_configs)},
-	{msm8x60_mdp_vsync_configs, ARRAY_SIZE(msm8x60_mdp_vsync_configs)},
+	//{msm8x60_mdp_vsync_configs, ARRAY_SIZE(msm8x60_mdp_vsync_configs)},
 	{msm8x60_sensor_cfgs_3g, ARRAY_SIZE(msm8x60_sensor_cfgs_3g)},
 	{msm8x60_lighting_cfgs_3g, ARRAY_SIZE(msm8x60_lighting_cfgs_3g)},
 
