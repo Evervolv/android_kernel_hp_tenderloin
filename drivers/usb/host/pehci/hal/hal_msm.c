@@ -420,7 +420,7 @@ isp1763_register_driver(struct isp1763_driver *drv)
 	if (drv->probe) {
 		result = drv->probe(dev, drv->id);
 	} else {
-		printk("%s no probe function for indes %d \n", __FUNCTION__,
+		printk("%s no probe function for index %d \n", __FUNCTION__,
 			(int)drv->index);
 	}
 
