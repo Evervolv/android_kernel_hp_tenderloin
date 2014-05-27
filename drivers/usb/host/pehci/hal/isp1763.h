@@ -45,7 +45,7 @@
 #define	ISO_DBG_ERR  1
 #define	ISO_DBG_INFO 1
 
-#if 0				/* Set to 1 to enable isochronous debugging */
+#if 1				/* Set to 1 to enable isochronous debugging */
 #define	iso_dbg(category, format, arg...) \
 do \
 { \
@@ -61,7 +61,7 @@ do \
 #endif /* CONFIG_ISO_SUPPORT */
 
 /*Debug	For Entry/Exit of the functions	*/
-//#define HCD_DEBUG_LEVEL1 
+#define HCD_DEBUG_LEVEL1 
 #ifdef HCD_DEBUG_LEVEL1
 #define	pehci_entry(format, args... ) printk(format, ##args)
 #else
@@ -69,7 +69,7 @@ do \
 #endif
 
 /*Debug	for Port Info and Errors */
-//#define HCD_DEBUG_LEVEL2 
+#define HCD_DEBUG_LEVEL2 
 #ifdef HCD_DEBUG_LEVEL2
 #define	pehci_print(format, args... ) printk(format, ##args)
 #else
@@ -77,7 +77,7 @@ do \
 #endif
 
 /*Debug	For the	Port changes and Enumeration */
-//#define HCD_DEBUG_LEVEL3 
+#define HCD_DEBUG_LEVEL3 
 #ifdef HCD_DEBUG_LEVEL3
 #define	pehci_info(format,arg...) printk(format, ##arg)
 #else
@@ -85,7 +85,7 @@ do \
 #endif
 
 /*Debug	For Transfer flow  */
-// #define HCD_DEBUG_LEVEL4 
+#define HCD_DEBUG_LEVEL4 
 #ifdef HCD_DEBUG_LEVEL4
 #define	pehci_check(format,args...) printk(format, ##args)
 #else
@@ -103,7 +103,7 @@ do \
 #undef	CHAPTER8_TEST		/* Enable to Pass Chapter 8 Test */
 
 /* Debug Entery/Exit of	Function as well as some other Info */
-//#define DEV_DEBUG_LEVEL2
+#define DEV_DEBUG_LEVEL2
 #ifdef DEV_DEBUG_LEVEL2
 #define	dev_print(format,arg...) printk(format,	##arg)
 #else
@@ -111,7 +111,7 @@ do \
 #endif
 
 /*Debug	for Interrupt ,	Registers , device Enable/Disable and some other info */
-//#define DEV_DEBUG_LEVEL3
+#define DEV_DEBUG_LEVEL3
 #undef dev_info
 #ifdef DEV_DEBUG_LEVEL3
 #define	dev_info(format,arg...)	printk(format, ##arg)
@@ -120,7 +120,7 @@ do \
 #endif
 
 /*Debug	for Tranffer flow , Enumeration	and Packet info	*/
-//#define DEV_DEBUG_LEVEL4
+#define DEV_DEBUG_LEVEL4
 #ifdef DEV_DEBUG_LEVEL4
 #define	dev_check(format,args...) printk(format, ##args)
 #else
@@ -131,7 +131,7 @@ do \
 
 /*******************START MSCD*******************************************/
 /*Debug	Entery/Exit of Function	as well	as some	other Information*/
-//#define MSCD_DEBUG_LEVEL2
+#define MSCD_DEBUG_LEVEL2
 #ifdef MSCD_DEBUG_LEVEL2
 #define	mscd_print(format,arg...) printk(format, ##arg)
 #else
@@ -139,7 +139,7 @@ do \
 #endif
 
 /*Debug	for Info */
-//#define MSCD_DEBUG_LEVEL3
+#define MSCD_DEBUG_LEVEL3
 #ifdef MSCD_DEBUG_LEVEL3
 #define	mscd_info(format,arg...) printk(format,	##arg)
 #else

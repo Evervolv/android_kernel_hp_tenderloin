@@ -920,7 +920,7 @@ phci_hcd_submit_async(phci_hcd * hcd,
 
 	/* now the quehead can not be in the unlink state */
 
-//	printk("qh->qh_state:0x%x \n",qh->qh_state);
+	printk("qh->qh_state:0x%x \n",qh->qh_state);
 	if (qh->qh_state == QH_STATE_UNLINK) {
 		pehci_info("%s:	free the urb,qh->state %x\n", __FUNCTION__,
 			   qh->qh_state);
