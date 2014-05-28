@@ -20,6 +20,7 @@ void max8903b_set_vbus_draw (unsigned ma);
 
 /* Important fields to initialize for Non-PCI based driver*/
 
+
 /* The base physical memory address assigned for the ISP176x */
 #define ISP176x_MEM_BASE 0x1D000000 //base address
 
@@ -669,7 +670,6 @@ void __init tenderloin_usb_i2c_init(void)
 			(machine_is_msm8x60_surf() ||
 			(machine_is_msm8x60_ffa() &&
 			pmic_id_notif_supported))){
-		printk("FLINTMAN  can powercollapse\n");
 		msm_otg_pdata.phy_can_powercollapse = 1;
 	}
 	msm_device_otg.dev.platform_data = &msm_otg_pdata;
