@@ -63,22 +63,12 @@ static int isp1763_setup_gpio(int enable)
 						__func__, ISP1763_INT_GPIO);
 			return status;
 		}
-		else
-		{
-			pr_info("%s:Successfully requested INT_GPIO %d\n",
-					__func__, ISP1763_INT_GPIO);
-		}
 		status = gpio_request(ISP1763_RST_GPIO, "isp1763_usb");
 		if (status) {
 			pr_err("%s:Failed to request GPIO %d\n",
 						__func__, ISP1763_RST_GPIO);
 			gpio_free(ISP1763_INT_GPIO);
 			return status;
-		}
-		else
-		{
-		pr_info("%s:Successfully requested RST_GPIO %d\n",
-						__func__, ISP1763_RST_GPIO);
 		}
 		gpio_requested = 1;
 	}
@@ -94,7 +84,7 @@ static int isp1763_setup_gpio(int enable)
 			pr_err("%s:Failed to configure GPIO %d\n",
 					__func__, ISP1763_RST_GPIO);
 		}
-		pr_info("\nISP GPIO configuration done\n");
+		pr_debug("\nISP GPIO configuration done\n");
 		return status;
 	}
 	else
@@ -130,11 +120,10 @@ static struct platform_device isp1763_device = {
 static int isp1763_modem_gpio_init(int on)
 {
 	int rc;
-	static int gpio_requested = 0;
+	static int gpio_requested=0;
 
 	int gpio_pwr_3g_en = pin_table[TENDERLOIN_GPIO_3G_3V3_EN];
-	pr_info("%s:pin table = %d\n", __func__, gpio_pwr_3g_en);
-	
+
 	if (!gpio_requested)
 	{
 		rc = gpio_request(gpio_pwr_3g_en, "VDD_3V3_EN");
@@ -143,7 +132,7 @@ static int isp1763_modem_gpio_init(int on)
 		}
 		else
 		{
-			pr_info("%s: VDD_3V3_EN gpio %d statu: %d\n", __func__, gpio_pwr_3g_en, gpio_get_value(gpio_pwr_3g_en));
+			pr_debug("%s: VDD_3V3_EN gpio %d statu: %d\n", __func__, gpio_pwr_3g_en, gpio_get_value(gpio_pwr_3g_en));
 		}
 
 		rc = gpio_request(GPIO_3G_DISABLE_N, "3G_DISABLE_N");
@@ -152,7 +141,7 @@ static int isp1763_modem_gpio_init(int on)
 		}
 		else
 		{
-			pr_info( "%s: GPIO_3G_DISABLE_N gpio %d status: %d\n", __func__, GPIO_3G_DISABLE_N, gpio_get_value(GPIO_3G_DISABLE_N));
+			pr_debug( "%s: GPIO_3G_DISABLE_N gpio %d status: %d\n", __func__, GPIO_3G_DISABLE_N, gpio_get_value(GPIO_3G_DISABLE_N));
 		}
 
 		rc = gpio_request(GPIO_3G_WAKE_N, "3G_WAKE");
