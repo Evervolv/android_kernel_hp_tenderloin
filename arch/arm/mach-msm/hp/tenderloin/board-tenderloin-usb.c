@@ -20,6 +20,7 @@ void max8903b_set_vbus_draw (unsigned ma);
 
 /* Important fields to initialize for Non-PCI based driver*/
 
+
 /* The base physical memory address assigned for the ISP176x */
 #define ISP176x_MEM_BASE 0x1D000000 //base address
 

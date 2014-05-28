@@ -3164,6 +3164,75 @@ static void fixup_i2c_configs(void)
 #endif
 }
 
+/*
+ * Most segments of the EBI2 bus are disabled by default.
+ */
+static void __init msm8x60_init_ebi2(void)
+{
+	uint32_t ebi2_cfg;
+	void *ebi2_cfg_ptr;
+	struct clk *mem_clk = clk_get_sys("msm_ebi2", "mem_clk");
+
+	if (IS_ERR(mem_clk)) {
+		pr_err("%s: clk_get_sys(%s,%s), failed", __func__,
+					"msm_ebi2", "mem_clk");
+		return;
+	}
+	clk_prepare_enable(mem_clk);
+	clk_put(mem_clk);
+
+	ebi2_cfg_ptr = ioremap_nocache(0x1a100000, sizeof(uint32_t));
+	if (ebi2_cfg_ptr != 0) {
+		ebi2_cfg = readl_relaxed(ebi2_cfg_ptr);
+
+		if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() || machine_is_tenderloin())
+			ebi2_cfg |= (1 << 4) | (1 << 5); /* CS2, CS3 */
+
+		writel_relaxed(ebi2_cfg, ebi2_cfg_ptr);
+		iounmap(ebi2_cfg_ptr);
+	}
+
+	if (machine_is_tenderloin()) {
+		ebi2_cfg_ptr = ioremap_nocache(0x1a110000, SZ_4K);
+		if (ebi2_cfg_ptr != 0) {
+			/* EBI2_XMEM_CFG:PWRSAVE_MODE off */
+			writel(0UL, ebi2_cfg_ptr);
+
+			/* CS2: Delay 9 cycles (140ns@64MHz) between SMSC
+			 * LAN9221 Ethernet controller reads and writes.
+			 * The lowest 4 bits are the read delay, the next
+			 * 4 are the write delay. */
+			writel(0x031F1C99, ebi2_cfg_ptr + 0x10);
+#ifdef CONFIG_USB_PEHCI_HCD
+			if(boardtype_is_3g()) {
+				/*
+				* RECOVERY=5, HOLD_WR=1
+				* INIT_LATENCY_WR=1, INIT_LATENCY_RD=1
+				* WAIT_WR=1, WAIT_RD=2
+				*/
+				writel(0x51010112, ebi2_cfg_ptr + 0x14);
+				/*
+				* HOLD_RD=1
+				* ADV_OE_RECOVERY=0, ADDR_HOLD_ENA=1
+				*/
+				writel(0x01000020, ebi2_cfg_ptr + 0x34);
+			}
+			else {
+				/* EBI2 CS3 muxed address/data,
+				* two cyc addr enable */
+				writel(0xA3030020, ebi2_cfg_ptr + 0x34);
+			}
+#else
+			/* EBI2 CS3 muxed address/data,
+			* two cyc addr enable */
+			writel(0xA3030020, ebi2_cfg_ptr + 0x34);
+
+#endif
+			iounmap(ebi2_cfg_ptr);
+		}
+	}
+}
+
 static void __init register_i2c_devices(void)
 {
 #ifdef CONFIG_I2C
@@ -3414,6 +3483,13 @@ static void __init tenderloin_init(void)
 		msm_spm_init(msm_spm_data_v1, ARRAY_SIZE(msm_spm_data_v1));
 
         msm8x60_init_buses();
+
+/*
+ * Enable EBI2 only for boards which make use of it. Leave
+ * it disabled for all others for additional power savings.
+ */
+    if (boardtype_is_3g())
+       msm8x60_init_ebi2();
 
 	platform_add_devices(early_devices, ARRAY_SIZE(early_devices));
 
