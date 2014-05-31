@@ -66,6 +66,12 @@ static struct gpiomux_setting ebi2_cs2 = {
 	.pull = GPIOMUX_PULL_UP,
 };
 
+static struct gpiomux_setting ps_hold = {
+	.func = GPIOMUX_FUNC_1,
+	.drv = GPIOMUX_DRV_12MA,
+	.pull = 0,
+};
+
 static struct gpiomux_setting ebi2_cs3 = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_8MA,
@@ -341,6 +347,12 @@ static struct msm_gpiomux_config msm8x60_ebi2_configs[] __initdata = {
 		},
 	},
 	{
+		.gpio      = 92,
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &ps_hold,
+		},
+	},
+	{
 		.gpio      = 123,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ebi2_a_d,
@@ -354,12 +366,6 @@ static struct msm_gpiomux_config msm8x60_ebi2_configs[] __initdata = {
 	},
 	{
 		.gpio      = 125,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ebi2_a_d,
-		},
-	},
-	{
-		.gpio      = 126,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ebi2_a_d,
 		},
