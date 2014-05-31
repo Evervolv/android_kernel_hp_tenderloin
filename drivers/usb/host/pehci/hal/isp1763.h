@@ -61,7 +61,7 @@ do \
 #endif /* CONFIG_ISO_SUPPORT */
 
 /*Debug	For Entry/Exit of the functions	*/
-//#define HCD_DEBUG_LEVEL1 
+#define HCD_DEBUG_LEVEL1
 #ifdef HCD_DEBUG_LEVEL1
 #define	pehci_entry(format, args... ) printk(format, ##args)
 #else
@@ -69,7 +69,7 @@ do \
 #endif
 
 /*Debug	for Port Info and Errors */
-//#define HCD_DEBUG_LEVEL2 
+#define HCD_DEBUG_LEVEL2
 #ifdef HCD_DEBUG_LEVEL2
 #define	pehci_print(format, args... ) printk(format, ##args)
 #else
@@ -77,7 +77,7 @@ do \
 #endif
 
 /*Debug	For the	Port changes and Enumeration */
-//#define HCD_DEBUG_LEVEL3 
+#define HCD_DEBUG_LEVEL3
 #ifdef HCD_DEBUG_LEVEL3
 #define	pehci_info(format,arg...) printk(format, ##arg)
 #else
@@ -85,7 +85,7 @@ do \
 #endif
 
 /*Debug	For Transfer flow  */
-// #define HCD_DEBUG_LEVEL4 
+ #define HCD_DEBUG_LEVEL4
 #ifdef HCD_DEBUG_LEVEL4
 #define	pehci_check(format,args...) printk(format, ##args)
 #else
