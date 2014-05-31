@@ -175,12 +175,6 @@ static const struct usb_device_id usb_quirk_list[] = {
 	/* Protocol and OTG Electrical Test Device */
 	{ USB_DEVICE(0x1a0a, 0x0200), .driver_info = USB_QUIRK_OTG_PET },
 
-	/* Philips ISP1520 Hub */
-	{ USB_DEVICE(0x0471, 0x3526), .driver_info = USB_QUIRK_NO_AUTOSUSPEND },
-
-	/* ST-ERICSSON ISP1763 Root-Hub */
-	{ USB_DEVICE(0x1d6b, 0x0002), .driver_info = USB_QUIRK_NO_AUTOSUSPEND },
-
 	{ }  /* terminating entry must be last */
 };
 

@@ -32,7 +32,4 @@
 
 #define USB_QUIRK_OTG_PET		0x00000080
 
-/* device doesn't support auto-suspend */
-#define USB_QUIRK_NO_AUTOSUSPEND	0x00000100
-
 #endif /* __LINUX_USB_QUIRKS_H */
