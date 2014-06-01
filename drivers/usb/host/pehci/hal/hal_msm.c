@@ -107,7 +107,7 @@ void
 isp1763_reg_write32(struct isp1763_dev *dev, u16 reg, u32 data)
 {
 	/* Write the 32bit to the register address given to us */
-	printk("%s: reg=%x,data=%x\n",__FUNCTION__, reg, data);
+
 	reg <<= 1;
 #ifdef DATABUS_WIDTH_16
 	writew((u16) data, dev->baseaddress + ((reg)));
@@ -133,7 +133,6 @@ isp1763_reg_read32(struct isp1763_dev *dev, u16 reg, u32 data)
 #else
 	u8 bval1, bval2, bval3, bval4;
 #endif
-	printk("%s: reg=%x,data=%x\n",__FUNCTION__, reg, data);
 	data = 0;
 	reg <<= 1;
 #ifdef DATABUS_WIDTH_16
@@ -169,7 +168,6 @@ u16
 isp1763_reg_read16(struct isp1763_dev * dev, u16 reg, u16 data)
 {
 	reg <<= 1;
-	printk("%s: reg=%x,data=%x\n",__FUNCTION__, reg, data);
 #ifdef DATABUS_WIDTH_16
 	data = readw(dev->baseaddress + ((reg)));
 #else
@@ -195,7 +193,6 @@ void
 isp1763_reg_write16(struct isp1763_dev *dev, u16 reg, u16 data)
 {
 	reg <<= 1;
-	printk("%s: reg=%x,data=%x\n",__FUNCTION__, reg, data);
 #ifdef DATABUS_WIDTH_16
 	writew(data, dev->baseaddress + ((reg)));
 #else
