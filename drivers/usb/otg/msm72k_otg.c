@@ -1125,6 +1125,16 @@ phy_resumed:
 		msm_otg_start_host(dev->phy.otg, REQUEST_RESUME);
 	}
 
+	if (!work_pending(&dev->sm_work) && !hrtimer_active(&dev->timer) &&
+			!work_pending(&dev->otg_resume_work)) {
+		wake_lock_timeout(&dev->wlock, msecs_to_jiffies(2000));
+	}
+
+	if (!work_pending(&dev->sm_work) && !hrtimer_active(&dev->timer) &&
+			!work_pending(&dev->otg_resume_work)) {
+		wake_lock_timeout(&dev->wlock, msecs_to_jiffies(2000));
+	}
+
 	/* Enable irq which was disabled before scheduling this work.
 	 * But don't release wake_lock, as we got async interrupt and
 	 * there will be some work pending for OTG state machine.
@@ -1597,6 +1607,22 @@ unsigned val, unsigned reg)
 
 	return -1;
 }
+
+#ifdef CONFIG_USB_MULTIPLE_CHARGER_DETECT
+static int usb_ulpi_write_with_reset(struct usb_phy *xceiv, u32 val, u32 reg)
+{
+	struct msm_otg *dev = container_of(xceiv, struct msm_otg, phy);
+
+	return ulpi_write_with_reset(dev, val, reg);
+}
+
+static int usb_ulpi_read_with_reset(struct usb_phy *xceiv, u32 reg)
+{
+	struct msm_otg *dev = container_of(xceiv, struct msm_otg, phy);
+
+	return ulpi_read_with_reset(dev, reg);
+}
+#endif
 
 /* some of the older targets does not turn off the PLL
  * if onclock bit is set and clocksuspendM bit is on,
@@ -2780,6 +2806,10 @@ static void otg_debugfs_cleanup(void)
 struct usb_phy_io_ops msm_otg_io_ops = {
 	.read = usb_ulpi_read,
 	.write = usb_ulpi_write,
+#ifdef CONFIG_USB_MULTIPLE_CHARGER_DETECT
+	.read_with_reset = usb_ulpi_read_with_reset,
+	.write_with_reset = usb_ulpi_write_with_reset,
+#endif
 };
 
 static int __init msm_otg_probe(struct platform_device *pdev)

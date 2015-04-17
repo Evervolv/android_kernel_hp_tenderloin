@@ -531,6 +531,7 @@ static struct user_pin bt_pins[] = {
 		.options    =  0,
 		.irq_handler = NULL,
 		.irq_config =  0,
+		.init_req   = 0,
 	},
 	{
 		.name       =  "host_wake",
@@ -543,7 +544,8 @@ static struct user_pin bt_pins[] = {
 		.options    =  PIN_IRQ | PIN_WAKEUP_SOURCE,
 		.irq_handler = NULL,
 		.irq_config = IRQF_TRIGGER_RISING,
-		.irq_handle_mode = IRQ_HANDLE_AUTO
+		.irq_handle_mode = IRQ_HANDLE_AUTO,
+		.init_req   = 1,
 	},
 };
 
@@ -3074,6 +3076,64 @@ static struct i2c_registry msm8x60_i2c_devices[] __initdata = {
 };
 #endif 
 
+/*
+ *   S3A_1V8
+ */
+static struct regulator *board_S3A_1V8 = NULL;
+static void __init board_setup_S3A_1V8 (void)
+{
+	int rc = 0;
+
+#if 1
+	/*
+	 * Enable S3A_1V8 regulator and force it to HPM mode.
+	 *
+	 * Ideally, this regulator should be in HPM mode when WiFi is ON
+	 * (even in suspend) or system is not in suspend.
+	 *
+	 * The code below is not optimal. It forces S3A_1V8 regulator to HPM
+	 * mode all the time, even in suspend, which add extra 300uA to
+	 * suspend power draw.
+	 *
+	 */
+	board_S3A_1V8 = regulator_get(NULL, "8058_s3");
+	if (IS_ERR(board_S3A_1V8)) {
+		pr_err("%s: unable to get %s\n",
+			__func__, "8058_s3");
+	}
+	rc = regulator_set_voltage(board_S3A_1V8, 1800000, 1800000);
+	if (rc) {
+		pr_err("%s: unable (%d) to set voltage for %s\n",
+			__func__, rc, "8058_s3");
+	}
+	if (regulator_enable(board_S3A_1V8)) {
+		pr_err("%s: Unable to enable %s\n",
+			 __func__, "8058_s3");
+	}
+	rc = regulator_set_optimum_mode(board_S3A_1V8, 100000);
+	if (rc < 0) {
+		pr_err("%s: unable (%d) to set opt mode for %s\n",
+			__func__, rc, "8058_s3");
+
+	}
+	pr_info("%s: %s: forcing HPM mode (%d)\n",
+			__func__, "8058_s3", rc );
+#else
+	/*
+	 *   The Alternative approach would be to call rpm_vreg_set_voltage
+	 *   API with sleep parameter set to zero. Regulator must be configured
+	 *   as sleep_selectable.
+	 */
+	rc = rpm_vreg_set_voltage(RPM_VREG_ID_PM8058_S3,
+				  enum rpm_vreg_voter voter, ??
+				  0, ??
+				  0);
+
+#endif
+
+	return;
+}
+
 static void fixup_i2c_configs(void)
 {
 #ifdef CONFIG_I2C
@@ -3104,75 +3164,6 @@ static void fixup_i2c_configs(void)
 #endif
 }
 
-/*
- * Most segments of the EBI2 bus are disabled by default.
- */
-static void __init msm8x60_init_ebi2(void)
-{
-	uint32_t ebi2_cfg;
-	void *ebi2_cfg_ptr;
-	struct clk *mem_clk = clk_get_sys("msm_ebi2", "mem_clk");
-
-	if (IS_ERR(mem_clk)) {
-		pr_err("%s: clk_get_sys(%s,%s), failed", __func__,
-					"msm_ebi2", "mem_clk");
-		return;
-	}
-	clk_prepare_enable(mem_clk);
-	clk_put(mem_clk);
-
-	ebi2_cfg_ptr = ioremap_nocache(0x1a100000, sizeof(uint32_t));
-	if (ebi2_cfg_ptr != 0) {
-		ebi2_cfg = readl_relaxed(ebi2_cfg_ptr);
-
-		if (machine_is_msm8x60_surf() || machine_is_msm8x60_ffa() || machine_is_tenderloin())
-			ebi2_cfg |= (1 << 4) | (1 << 5); /* CS2, CS3 */
-
-		writel_relaxed(ebi2_cfg, ebi2_cfg_ptr);
-		iounmap(ebi2_cfg_ptr);
-	}
-
-	if (machine_is_tenderloin()) {
-		ebi2_cfg_ptr = ioremap_nocache(0x1a110000, SZ_4K);
-		if (ebi2_cfg_ptr != 0) {
-			/* EBI2_XMEM_CFG:PWRSAVE_MODE off */
-			writel(0UL, ebi2_cfg_ptr);
-
-			/* CS2: Delay 9 cycles (140ns@64MHz) between SMSC
-			 * LAN9221 Ethernet controller reads and writes.
-			 * The lowest 4 bits are the read delay, the next
-			 * 4 are the write delay. */
-			writel(0x031F1C99, ebi2_cfg_ptr + 0x10);
-#ifdef CONFIG_USB_PEHCI_HCD
-			if(boardtype_is_3g()) {
-				/*
-				* RECOVERY=5, HOLD_WR=1
-				* INIT_LATENCY_WR=1, INIT_LATENCY_RD=1
-				* WAIT_WR=1, WAIT_RD=2
-				*/
-				writel(0x51010112, ebi2_cfg_ptr + 0x14);
-				/*
-				* HOLD_RD=1
-				* ADV_OE_RECOVERY=0, ADDR_HOLD_ENA=1
-				*/
-				writel(0x01000020, ebi2_cfg_ptr + 0x34);
-			}
-			else {
-				/* EBI2 CS3 muxed address/data,
-				* two cyc addr enable */
-				writel(0xA3030020, ebi2_cfg_ptr + 0x34);
-			}
-#else
-			/* EBI2 CS3 muxed address/data,
-			* two cyc addr enable */
-			writel(0xA3030020, ebi2_cfg_ptr + 0x34);
-
-#endif
-			iounmap(ebi2_cfg_ptr);
-		}
-	}
-}
-
 static void __init register_i2c_devices(void)
 {
 #ifdef CONFIG_I2C
@@ -3194,6 +3185,7 @@ static void __init register_i2c_devices(void)
 }
 
 #ifdef CONFIG_SERIAL_MSM_HS
+#if 0
 static int configure_uart_gpios(int on)
 {
 	int ret = 0;
@@ -3203,10 +3195,11 @@ static int configure_uart_gpios(int on)
 
 	return ret;
 }
+#endif
 static struct msm_serial_hs_platform_data msm_uart_dm1_pdata = {
 	.inject_rx_on_wakeup = 1,
 	.rx_to_inject = 0xFD,
-	.gpio_config = configure_uart_gpios,
+        //        .gpio_config = configure_uart_gpios,
 };
 #endif
 
@@ -3424,13 +3417,6 @@ static void __init tenderloin_init(void)
 
         msm8x60_init_buses();
 
-/*
- * Enable EBI2 only for boards which make use of it. Leave
- * it disabled for all others for additional power savings.
- */
-    if (boardtype_is_3g())
-       msm8x60_init_ebi2();
-
 	platform_add_devices(early_devices, ARRAY_SIZE(early_devices));
 
 	msm8x60_init_uart12dm();
@@ -3454,14 +3440,14 @@ static void __init tenderloin_init(void)
 	platform_add_devices(tenderloin_devices,
 			     ARRAY_SIZE(tenderloin_devices));
 
-    tenderloin_init_fb();
+        tenderloin_init_fb();
 
 	lcdc_lg_panel_power(1);
-    tenderloin_gpio_mpp_init();
-    tenderloin_usb_init();
-    platform_device_register(&tenderloin_8901_mpp_vreg);
+        tenderloin_gpio_mpp_init();
+        tenderloin_usb_init();
+        platform_device_register(&tenderloin_8901_mpp_vreg);
 #ifdef CONFIG_MSM_DSPS
-	msm8x60_init_dsps();
+		msm8x60_init_dsps();
 #endif
 #ifdef CONFIG_MAX8903B_CHARGER
 	//reverse the polarity of the max8903b USUS_pin on TopazWifi from DVT1 hwbuild
@@ -3488,11 +3474,11 @@ static void __init tenderloin_init(void)
 #ifdef CONFIG_MSM8X60_AUDIO
 	msm_snddev_init();
 #endif
-
-        tenderloin_init_keypad();
-        //        tenderloin_init_wifi();
-
-        printk(KERN_ERR "%s: --\n", __func__);
+#ifdef CONFIG_MACH_TENDERLOIN
+    board_setup_S3A_1V8();
+#endif
+    tenderloin_init_keypad();
+    printk(KERN_ERR "%s: --\n", __func__);
 }
 
 MACHINE_START(TENDERLOIN, "tenderloin")	

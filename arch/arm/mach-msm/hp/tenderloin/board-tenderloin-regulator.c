@@ -175,6 +175,11 @@ VREG_CONSUMERS(PM8901_MVS0) = {
 	REGULATOR_SUPPLY("8901_mvs0",		NULL),
 };
 
+VREG_CONSUMERS(EXT_5V) = {
+	REGULATOR_SUPPLY("ext_5v",              NULL),
+	REGULATOR_SUPPLY("8901_mpp0",           NULL),
+};
+
 /* Pin control regulators */
 VREG_CONSUMERS(PM8058_L8_PC) = {
 	REGULATOR_SUPPLY("8058_l8_pc",		NULL),
@@ -294,20 +299,7 @@ VREG_CONSUMERS(PM8901_S4_PC) = {
 		      RPM_VREG_FORCE_MODE_8660_NONE, RPM_VREG_STATE_OFF, \
 		      _sleep_selectable, _always_on)
 
-#define LDO50HMIN	RPM_VREG_8660_LDO_50_HPM_MIN_LOAD
-#define LDO150HMIN	RPM_VREG_8660_LDO_150_HPM_MIN_LOAD
-#define LDO300HMIN	RPM_VREG_8660_LDO_300_HPM_MIN_LOAD
-#define SMPS_HMIN	RPM_VREG_8660_SMPS_HPM_MIN_LOAD
-#define FTS_HMIN	RPM_VREG_8660_FTSMPS_HPM_MIN_LOAD
-
-#define GPIO_VREG_ID_EXT_5V		0
-
-static struct regulator_consumer_supply vreg_consumers_EXT_5V[] = {
-	REGULATOR_SUPPLY("ext_5v",	NULL),
-	REGULATOR_SUPPLY("8901_mpp0",	NULL),
-};
-
-#define GPIO_VREG_INIT(_id, _reg_name, _gpio_label, _gpio, _active_low) \
+#define GPIO_VREG(_id, _reg_name, _gpio_label, _gpio, _supply_regulator) \
 	[GPIO_VREG_ID_##_id] = { \
 		.init_data = { \
 			.constraints = { \
@@ -316,16 +308,23 @@ static struct regulator_consumer_supply vreg_consumers_EXT_5V[] = {
 			.num_consumer_supplies	= \
 					ARRAY_SIZE(vreg_consumers_##_id), \
 			.consumer_supplies	= vreg_consumers_##_id, \
+			.supply_regulator	= _supply_regulator, \
 		}, \
-		.regulator_name	= _reg_name, \
-		.active_low	= _active_low, \
+		.regulator_name = _reg_name, \
 		.gpio_label	= _gpio_label, \
 		.gpio		= _gpio, \
 	}
 
+#define LDO50HMIN	RPM_VREG_8660_LDO_50_HPM_MIN_LOAD
+#define LDO150HMIN	RPM_VREG_8660_LDO_150_HPM_MIN_LOAD
+#define LDO300HMIN	RPM_VREG_8660_LDO_300_HPM_MIN_LOAD
+#define SMPS_HMIN	RPM_VREG_8660_SMPS_HPM_MIN_LOAD
+#define FTS_HMIN	RPM_VREG_8660_FTSMPS_HPM_MIN_LOAD
+#define GPIO_VREG_ID_EXT_5V		0
+
 /* GPIO regulator constraints */
 static struct gpio_regulator_platform_data msm_gpio_regulator_pdata[] = {
-	GPIO_VREG_INIT(EXT_5V, "ext_5v", "ext_5v_en",
+	GPIO_VREG(EXT_5V, "ext_5v", "ext_5v_en",
 					PM8901_MPP_PM_TO_SYS(0), 0),
 };
 
@@ -340,11 +339,11 @@ struct platform_device tenderloin_8901_mpp_vreg __devinitdata = {
 };
 
 struct pm8xxx_mpp_init_info {
-       unsigned mpp;
-       struct pm8xxx_mpp_config_data config;
+	unsigned			mpp;
+	struct pm8xxx_mpp_config_data	config;
 };
 
-void __init tenderloin_pm8901_vreg_mpp_init(void)
+void __init tenderloin_pm8901_gpio_mpp_init(void)
 {
 	int rc;
 
@@ -361,7 +360,7 @@ void __init tenderloin_pm8901_vreg_mpp_init(void)
 	 * implies that the regulator connected to MPP0 is enabled when
 	 * MPP0 is low.
 	 */
-	msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_5V].active_low = 1;
+        msm_gpio_regulator_pdata[GPIO_VREG_ID_EXT_5V].active_low = 1;
 	pm8901_vreg_mpp0.config.control = PM8XXX_MPP_DOUT_CTRL_HIGH;
 
 	rc = pm8xxx_mpp_config(pm8901_vreg_mpp0.mpp, &pm8901_vreg_mpp0.config);

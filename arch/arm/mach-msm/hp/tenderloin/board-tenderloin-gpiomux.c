@@ -42,7 +42,6 @@ static struct gpiomux_setting i2c_active = {
 	.pull = GPIOMUX_PULL_NONE,
 };
 
-#if defined(CONFIG_USB_PEHCI_HCD) || defined(CONFIG_USB_PEHCI_HCD_MODULE)
 static struct gpiomux_setting ebi2_a_d = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_8MA,
@@ -67,18 +66,11 @@ static struct gpiomux_setting ebi2_cs2 = {
 	.pull = GPIOMUX_PULL_UP,
 };
 
-static struct gpiomux_setting ps_hold = {
-	.func = GPIOMUX_FUNC_1,
-	.drv = GPIOMUX_DRV_12MA,
-	.pull = 0,
-};
-
 static struct gpiomux_setting ebi2_cs3 = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_UP,
 };
-#endif
 
 #if defined(CONFIG_USB_PEHCI_HCD) || defined(CONFIG_USB_PEHCI_HCD_MODULE)
 static struct gpiomux_setting ebi2_cs4 = {
@@ -86,13 +78,13 @@ static struct gpiomux_setting ebi2_cs4 = {
 	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_UP,
 };
+#endif
 
 static struct gpiomux_setting ebi2_adv = {
 	.func = GPIOMUX_FUNC_1,
 	.drv = GPIOMUX_DRV_8MA,
 	.pull = GPIOMUX_PULL_UP,
 };
-#endif
 
 #ifdef CONFIG_MSM8X60_AUDIO
 static struct gpiomux_setting aux_pcm_active_config = {
@@ -341,18 +333,11 @@ static struct msm_gpiomux_config msm8x60_gsbi_configs[] __initdata = {
 	},
 };
 
-#ifdef CONFIG_USB_PEHCI_HCD
 static struct msm_gpiomux_config msm8x60_ebi2_configs[] __initdata = {
 	{
 		.gpio      = 40,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ebi2_cs2,
-		},
-	},
-	{
-		.gpio      = 92,
-		.settings = {
-			[GPIOMUX_SUSPENDED] = &ps_hold,
 		},
 	},
 	{
@@ -369,6 +354,12 @@ static struct msm_gpiomux_config msm8x60_ebi2_configs[] __initdata = {
 	},
 	{
 		.gpio      = 125,
+		.settings = {
+			[GPIOMUX_SUSPENDED] = &ebi2_a_d,
+		},
+	},
+	{
+		.gpio      = 126,
 		.settings = {
 			[GPIOMUX_SUSPENDED] = &ebi2_a_d,
 		},
@@ -527,7 +518,6 @@ static struct msm_gpiomux_config msm8x60_ebi2_configs[] __initdata = {
 		},
 	},
 };
-#endif
 
 #ifdef CONFIG_USB_PEHCI_HCD
 static struct msm_gpiomux_config msm8x60_isp_usb_configs[] __initdata = {

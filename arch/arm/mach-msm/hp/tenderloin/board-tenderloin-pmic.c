@@ -432,6 +432,7 @@ void __init tenderloin_gpio_mpp_init(void)
 			break ;
 		}
 	}
+	tenderloin_pm8901_gpio_mpp_init();
 }
 
 static struct pm8xxx_vibrator_platform_data pm8058_vib_pdata = {

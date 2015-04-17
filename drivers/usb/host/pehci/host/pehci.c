@@ -979,7 +979,7 @@ pehci_hcd_qtd_schedule(phci_hcd	* hcd, struct ehci_qtd *qtd,
 	pehci_check("newqtd being scheduled, device: %d,map: %x\n",
 		    urb->dev->devnum, td_ptd_map->ptd_bitmap);
 
-	//udelay(100);
+	udelay(100);
 
 	memset(qha, 0, sizeof(isp1763_qha));
 	/*convert qtd to qha */
@@ -4494,8 +4494,9 @@ pehci_hcd_start(struct usb_hcd *usb_hcd)
 	isp1763_reg_write16(pehci_hcd->dev, pehci_hcd->regs.hwmodecontrol,
 		hwmodectrl);	
 	printk(KERN_NOTICE "Mode Ctrl Value after buswidth: %x\n", hwmodectrl);
-
+	mb();
 	isp1763_reg_write16(pehci_hcd->dev, pehci_hcd->regs.scratch, 0x3344);
+	ndelay(100);
 
 	ul_scratchval =
 		isp1763_reg_read16(pehci_hcd->dev, pehci_hcd->regs.scratch,
@@ -4833,14 +4834,12 @@ pehci_hcd_urb_enqueue(struct usb_hcd *usb_hcd, struct urb *urb, gfp_t mem_flags)
 		break;
 #ifdef CONFIG_ISO_SUPPORT
 	case PIPE_ISOCHRONOUS:
-		/*
 		iso_dbg(ISO_DBG_DATA,
 			"[pehci_hcd_urb_enqueue]: URB Transfer buffer: 0x%08x\n",
 			(long) urb->transfer_buffer);
 		iso_dbg(ISO_DBG_DATA,
 			"[pehci_hcd_urb_enqueue]: URB Buffer Length: %d\n",
 			(long) urb->transfer_buffer_length);
-		*/
 #if LINUX_VERSION_CODE < KERNEL_VERSION(2,6,24)
 		phcd_submit_iso(pehci_hcd, ep, urb, (unsigned long *) &status);
 #else
@@ -5159,7 +5158,7 @@ pehci_hcd_urb_dequeue(struct usb_hcd *usb_hcd, struct urb *urb, int status)
 		break;
 #ifdef CONFIG_ISO_SUPPORT
 	case PIPE_ISOCHRONOUS:
-		//pehci_info("urb dequeue %x %x\n", urb,urb->pipe);
+		pehci_info("urb dequeue %x %x\n", urb,urb->pipe);
 
 #if LINUX_VERSION_CODE >= KERNEL_VERSION(2,6,24)
 	if(urb->dev->speed==USB_SPEED_HIGH){
@@ -5188,7 +5187,7 @@ pehci_hcd_urb_dequeue(struct usb_hcd *usb_hcd, struct urb *urb, int status)
 	if(!list_empty(&ep->urb_list)){	
 		while(!list_empty(&ep->urb_list)){
 			urb=container_of(ep->urb_list.next,struct urb,urb_list);
-			//pehci_info("list is not empty %x %x\n",urb,urb->dev->state);
+			pehci_info("list is not empty %x %x\n",urb,urb->dev->state);
 			if(urb){
 		retval = usb_hcd_check_unlink_urb(usb_hcd, urb,0);
 		if (!retval) {

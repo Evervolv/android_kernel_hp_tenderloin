@@ -375,7 +375,6 @@ void *pil_get(const char *name)
 	pil = retval = find_peripheral(name);
 	if (!pil)
 		return ERR_PTR(-ENODEV);
-
 	if (!try_module_get(pil->owner)) {
 		put_device(&pil->dev);
 		return ERR_PTR(-ENODEV);
